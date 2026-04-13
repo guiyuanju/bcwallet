@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use bitcoin::{Address, Network, PrivateKey, PublicKey};
-use secp256k1::{Secp256k1, rand};
+use secp256k1::{Secp256k1, rand::rngs::OsRng};
 use serde::Serialize;
 use std::{fs, str::FromStr};
 
@@ -20,7 +20,7 @@ impl Wallet {
 
     pub fn compute_key_addr(&mut self) {
         let secp = Secp256k1::new();
-        let (secret_key, public_key) = secp.generate_keypair(&mut rand::thread_rng());
+        let (secret_key, public_key) = secp.generate_keypair(&mut OsRng);
         let private_key = PrivateKey::new(secret_key, Network::Testnet);
         let address = Address::p2pkh(PublicKey::new(public_key), Network::Testnet);
 
