@@ -1,4 +1,5 @@
 mod wallet;
+
 use crate::wallet::Wallet;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -19,7 +20,11 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::NewWallet => Wallet::new().save()?,
+        Commands::NewWallet => {
+            let mut wallet = Wallet::new();
+            wallet.compute_key_addr();
+            wallet.save()?;
+        }
     }
 
     Ok(())
