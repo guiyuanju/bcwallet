@@ -1,10 +1,15 @@
 use anyhow::{Context, Result};
 use bitcoin::{Address, Network, PrivateKey, PublicKey};
 use secp256k1::{Secp256k1, rand::rngs::OsRng};
-use serde::Serialize;
-use std::{fs, str::FromStr};
+use serde::{Deserialize, Serialize};
+use std::{
+    fs::{self, File},
+    io::BufReader,
+    mem::replace,
+    str::FromStr,
+};
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct Wallet {
     private_key: String,
     address: String,
@@ -38,10 +43,18 @@ impl Wallet {
             .context("expect address to use testnet")
     }
 
-    pub fn save(&self) -> Result<()> {
+    pub fn save(&self, file_path: &str) -> Result<()> {
         let json =
             serde_json::to_string_pretty(self).context("falied to serialize wallet to json")?;
-        fs::write("wallet.json", &json).context("failed to write to wallet")?;
+        fs::write(file_path, &json).context("failed to write to wallet")
+    }
+
+    pub fn load(&mut self, file_path: &str) -> Result<()> {
+        let file = File::open(file_path).context("failed to open wallet file")?;
+        let reader = BufReader::new(file);
+        let wallet: Wallet =
+            serde_json::from_reader(reader).context("failed to deserialize wallet file")?;
+        replace(self, wallet);
         Ok(())
     }
 }
