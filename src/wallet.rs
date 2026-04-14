@@ -3,8 +3,8 @@ use bitcoin::{Address, Network, PrivateKey, PublicKey};
 use secp256k1::{Secp256k1, rand::rngs::OsRng};
 use serde::{Deserialize, Serialize};
 use std::{
-    fs::{self, File},
-    io::BufReader,
+    fs::{self, File, OpenOptions},
+    io::{BufReader, Write},
     mem::replace,
     str::FromStr,
 };
@@ -46,7 +46,11 @@ impl Wallet {
     pub fn save(&self, file_path: &str) -> Result<()> {
         let json =
             serde_json::to_string_pretty(self).context("falied to serialize wallet to json")?;
-        fs::write(file_path, &json).context("failed to write to wallet")
+        let mut file = OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(file_path)?;
+        writeln!(file, "{}", json).context("failed to write to wallet")
     }
 
     pub fn load(&mut self, file_path: &str) -> Result<()> {
@@ -54,7 +58,7 @@ impl Wallet {
         let reader = BufReader::new(file);
         let wallet: Wallet =
             serde_json::from_reader(reader).context("failed to deserialize wallet file")?;
-        replace(self, wallet);
+        _ = replace(self, wallet);
         Ok(())
     }
 }
