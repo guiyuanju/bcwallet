@@ -95,43 +95,34 @@ impl NetworkClient for DescriptorLocalRpcClient {
 mod tests {
     use super::*;
     use crate::wallet::Wallet;
+    use std::{env, sync::LazyLock};
 
-    fn get_addr() -> Address {
-        let mut wallet = Wallet::new();
-        wallet.load("wallet_test.json").unwrap();
-        wallet.address().unwrap()
+    struct Cache {
+        addr: Address,
+        client: DescriptorLocalRpcClient,
     }
+
+    static CACHE: LazyLock<Cache> = LazyLock::new(|| {
+        let wallet_path = env::var("WALLET").unwrap_or("wallet.json".to_owned());
+        let port = env::var("BTC_RPC_PORT").unwrap_or("18332".to_owned());
+        let username = env::var("BTC_RPC_USER").unwrap_or("user".to_owned());
+        let passwd = env::var("BTC_RPC_PASS").unwrap_or("passwd".to_owned());
+
+        let mut wallet = Wallet::new();
+        wallet.load(&wallet_path).unwrap();
+        let addr = wallet.address().unwrap();
+
+        let client = LocalRpcClient::new(&port, &username, &passwd).unwrap();
+        let client = client.watch_address(&[&addr]).unwrap();
+
+        Cache { addr, client }
+    });
 
     #[test]
-    fn test_import_descriptors() {
-        let addr = get_addr();
-        let client = LocalRpcClient::new("18332", "user", "passwd").unwrap();
-        assert!(client.import_descriptor(&addr).is_ok());
+    fn test_get_utxos() {
+        let addr = &CACHE.addr;
+        let client = &CACHE.client;
+        let res = client.get_uxtos(&addr).unwrap();
+        println!("{:?}", res);
     }
-
-    // #[test]
-    // fn test_get_utxos() {
-    //     let addr = get_addr();
-    //     let client = client.watch_address(&[&addr]).unwrap();
-    //     let res = client.get_uxtos(&addr).unwrap();
-    //     println!("{:?}", res);
-    // }
-
-    // #[test]
-    // fn test_json() {
-    //     let mut wallet = Wallet::new();
-    //     wallet.load("wallet_test.json").unwrap();
-    //     let addr = wallet.address().unwrap();
-    //     let descriptor = ImportDescriptors {
-    //         descriptor: addr.to_string(),
-    //         timestamp: bitcoincore_rpc::json::Timestamp::Now, // scan from now
-    //         active: Some(false),                              // watch only
-    //         range: None,                                      // fixed single address
-    //         next_index: None,                                 // since no auto address generation
-    //         internal: Some(false),                            // receive payment from others
-    //         label: Some("bcwallet".to_owned()),
-    //     };
-    //     let json_request = vec![serde_json::to_value(descriptor).unwrap()];
-    //     println!("{:?}", json_request);
-    // }
 }
