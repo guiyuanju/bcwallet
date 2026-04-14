@@ -1,3 +1,6 @@
+mod network;
+mod restclient;
+mod types;
 mod wallet;
 
 use crate::wallet::Wallet;
@@ -23,7 +26,7 @@ fn main() -> Result<()> {
         Commands::NewWallet => {
             let mut wallet = Wallet::new();
             wallet.compute_key_addr();
-            wallet.save()?;
+            wallet.save("wallet.json")?;
         }
     }
 
