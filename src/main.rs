@@ -1,9 +1,15 @@
-mod network;
-mod rpcclient;
+mod btcclient;
+mod localrpc;
 mod types;
+mod utils;
 mod wallet;
 
-use crate::{network::NetworkClient, rpcclient::LocalRpcClient, wallet::Wallet};
+use crate::{
+    btcclient::BtcClient,
+    localrpc::LocalRpc,
+    utils::{as_hex, decode_base58},
+    wallet::Wallet,
+};
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::env;
@@ -20,6 +26,10 @@ enum Commands {
     NewWallet,
     /// Get balance of current address
     Balance,
+    /// Watch current address, need only called once for each new address
+    Watch,
+    /// Decode a base58 encoded string
+    DecodeBase58 { src: String },
 }
 
 fn main() -> Result<()> {
@@ -40,10 +50,22 @@ fn main() -> Result<()> {
             let mut wallet = Wallet::new();
             wallet.load(&wallet_path)?;
             let addr = wallet.address()?;
-            let client = LocalRpcClient::new(&port, &username, &passwd)?.watch_address(&[&addr])?;
+            let client = LocalRpc::new(&port, &username, &passwd)?;
             let balance = client.get_balance(&addr)?;
 
             println!("{} satoshi", balance);
+        }
+        Commands::Watch => {
+            let mut wallet = Wallet::new();
+            wallet.load(&wallet_path)?;
+            let addr = wallet.address()?;
+            let client = LocalRpc::new(&port, &username, &passwd)?;
+            client.watch_address(&[&addr])?;
+        }
+        Commands::DecodeBase58 { src } => {
+            let bytes = decode_base58(&src)?;
+            let hex = as_hex(&bytes);
+            println!("{:?}", hex);
         }
     }
 

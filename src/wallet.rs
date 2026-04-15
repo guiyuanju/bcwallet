@@ -3,7 +3,7 @@ use bitcoin::{Address, Network, PrivateKey, PublicKey};
 use secp256k1::{Secp256k1, rand::rngs::OsRng};
 use serde::{Deserialize, Serialize};
 use std::{
-    fs::{self, File, OpenOptions},
+    fs::{File, OpenOptions},
     io::{BufReader, Write},
     mem::replace,
     str::FromStr,
