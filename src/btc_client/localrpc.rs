@@ -1,6 +1,6 @@
 use crate::{
     btc_client::BtcClient,
-    uxtoset::{Utxo, UtxoSet},
+    utxoset::{Utxo, UtxoSet},
 };
 use anyhow::{Context, Result, bail};
 use bitcoin::{Address, Amount};
@@ -19,7 +19,7 @@ impl LocalRpc {
         // Security concern: password is stored in memory (client).
         let url = format!("http://127.0.0.1:{port}");
         let auth = Auth::UserPass(username.to_owned(), passwd.to_owned());
-        let client = Client::new(&url, auth).context("faled to connet to local rpc client")?;
+        let client = Client::new(&url, auth).context("failed to connect to local rpc client")?;
 
         Ok(Self { client })
     }
@@ -34,8 +34,8 @@ impl LocalRpc {
     }
 
     fn import_descriptor(&self, addr: &Address) -> Result<()> {
-        // compose the correct descriptor fotmat
-        let addr_descrip = format!("addr({})", addr.to_string());
+        // compose the correct descriptor format
+        let addr_descrip = format!("addr({addr})");
 
         // get checksumed descriptor
         let descriptor = self
@@ -69,7 +69,7 @@ impl LocalRpc {
 }
 
 impl BtcClient for LocalRpc {
-    fn get_uxto_set(&self, addr: &Address) -> Result<UtxoSet> {
+    fn get_utxo_set(&self, addr: &Address) -> Result<UtxoSet> {
         // get all transactions confirmed by at least one block
         let utxos = self
             .client
@@ -83,7 +83,7 @@ impl BtcClient for LocalRpc {
     }
 
     fn get_balance(&self, addr: &Address) -> Result<Amount> {
-        let utxos = self.get_uxto_set(addr)?;
+        let utxos = self.get_utxo_set(addr)?;
         Ok(utxos.balance())
     }
 
@@ -97,7 +97,8 @@ impl BtcClient for LocalRpc {
             bail!("failed to get smart fee: {:?}", errs);
         }
         if let Some(fee_rate) = res.fee_rate {
-            return Ok(fee_rate);
+            // estimatesmartfee returns BTC/kB, convert to sat/vB
+            return Ok(Amount::from_sat(fee_rate.to_sat() / 1000));
         }
         bail!("failed to get smart fee");
     }
@@ -107,6 +108,7 @@ impl BtcClient for LocalRpc {
 mod tests {
     use super::*;
     use crate::utils::{load_wallet, new_rpc_client};
+    use bitcoin::Network;
     use std::sync::LazyLock;
 
     struct Cache {
@@ -116,7 +118,7 @@ mod tests {
 
     static CACHE: LazyLock<Cache> = LazyLock::new(|| {
         let wallet = load_wallet();
-        let addr = wallet.address().unwrap();
+        let addr = wallet.address(Network::Testnet).unwrap();
         let client = new_rpc_client();
 
         Cache { addr, client }
@@ -126,7 +128,7 @@ mod tests {
     fn test_get_utxos() {
         let addr = &CACHE.addr;
         let client = &CACHE.client;
-        let res = client.get_uxto_set(&addr).unwrap();
+        let res = client.get_utxo_set(&addr).unwrap();
         println!("{:?}", res.utxos());
     }
 }

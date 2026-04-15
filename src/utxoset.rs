@@ -52,14 +52,14 @@ impl UtxoSet {
     pub fn select_input<T>(
         &self,
         amount: Amount,
-        output_count: u64,
+        output_vbytes: u64,
         fee_rate: Amount,
         strategy: T,
     ) -> Result<(UtxoSet, Amount)>
     where
         T: UtxoInputSelectStrategy,
     {
-        strategy.select_input(&self.utxos, amount, output_count, fee_rate)
+        strategy.select_input(&self.utxos, amount, output_vbytes, fee_rate)
     }
 
     pub fn balance(&self) -> Amount {

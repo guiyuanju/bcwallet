@@ -1,144 +1,194 @@
 use crate::{
-    btc_client::BtcClient, input_select_strategy::min::MinFirstStrategy, uxtoset::UtxoSet,
+    btc_client::BtcClient,
+    input_select_strategy::min::MinFirstStrategy,
+    params::{Receiver, Receivers, TransactionParams},
     wallet::Wallet,
 };
 use anyhow::Result;
 use bitcoin::{
-    Address, Amount, EcdsaSighashType, Transaction, TxOut,
-    absolute::LockTime,
+    EcdsaSighashType, Network, TxOut,
+    consensus::encode::serialize_hex,
+    ecdsa::Signature as BtcSig,
     script::{self, PushBytes},
     sighash::SighashCache,
-    transaction::Version,
 };
 use secp256k1::Secp256k1;
 
-struct TransactionManager {
+pub struct TransactionManager {
     wallet: Wallet,
+    network: Network,
 }
 
 impl TransactionManager {
-    pub fn new(wallet: Wallet) -> Self {
-        Self { wallet }
+    pub fn new(wallet: Wallet, network: Network) -> Self {
+        Self { wallet, network }
     }
 
-    /// Generate unsigned transaction, need a Bitcoin client for UTXO query
-    pub fn generate_unsigned_transaction<T: BtcClient>(
+    /// Prepare transaction params by fetching UTXOs online,
+    /// change is computed and appended as a receiver automatically
+    pub fn prepare<T: BtcClient>(
         &self,
         client: T,
-        receiver: Address,
-        amount_out: Amount,
-    ) -> Result<Transaction> {
-        // Select UTXOs based on provided strategy
-        let utxo_set = client.get_uxto_set(&self.wallet.address()?)?;
-        let (inputs, fee) =
-            utxo_set.select_input(amount_out, 2, client.get_fee_rate()?, MinFirstStrategy())?;
+        mut receivers: Receivers,
+    ) -> Result<TransactionParams> {
+        let total_out = receivers.total_out();
 
-        // Construct output to reciever
-        let mut outputs = vec![TxOut {
-            value: amount_out,
-            script_pubkey: receiver.script_pubkey(),
-        }];
+        // Select inputs from UTXO set that cover amount and fee
+        let utxo_set = client.get_utxo_set(&self.wallet.address(self.network)?)?;
+        // P2PKH change output = 34 vbytes
+        let output_vbytes = receivers.output_vbytes(self.network)? + 34;
+        let (inputs, fee) = utxo_set.select_input(
+            total_out,
+            output_vbytes,
+            client.get_fee_rate()?,
+            MinFirstStrategy(),
+        )?;
 
-        // Construct change to sender, skip change that is a dust
-        let sender = self.wallet.address()?;
+        // Calculate change, skip if it's a dust
+        let sender = self.wallet.address(self.network)?;
         let dust_limit = TxOut::minimal_non_dust(sender.script_pubkey());
-        let amount_in = inputs.balance();
-        let change = amount_in - amount_out - fee;
-        if change >= dust_limit.value {
-            outputs.push(TxOut {
-                value: change,
-                script_pubkey: sender.script_pubkey(),
-            });
+        let raw_change = inputs.balance() - total_out - fee;
+        if raw_change >= dust_limit.value {
+            receivers.push(Receiver::new(&sender, raw_change));
         }
 
-        // Construct final unsigned transaction
-        let tx = Transaction {
-            version: Version::TWO,
-            lock_time: LockTime::ZERO,
-            input: inputs.utxos().iter().map(|u| u.into()).collect(),
-            output: outputs,
-        };
-
-        Ok(tx)
+        Ok(TransactionParams::new(receivers.into_inner(), &inputs))
     }
 
-    /// Sign un unsigned transaction (Offline)
-    pub fn sign(&self, transaction: Transaction, uxtos: UtxoSet) -> Result<Transaction> {
-        let mut tx = transaction;
+    /// Sign a transaction from params (offline, no network access).
+    /// Returns the broadcast-ready hex string.
+    pub fn sign(&self, params: &TransactionParams) -> Result<String> {
+        let utxo_set = params.to_utxo_set()?;
+        let mut tx = params.to_unsigned_tx(&utxo_set, self.network)?;
+
         let secret_key = self.wallet.secret_key()?;
         let pubkey = self.wallet.public_key()?;
         let secp = Secp256k1::new();
 
-        for (i, utxo) in uxtos.utxos().iter().enumerate() {
+        for (i, utxo) in utxo_set.utxos().iter().enumerate() {
+            // Compute the legacy sighash for this input (hash of tx + input's scriptPubKey)
             let cache = SighashCache::new(&tx);
-
-            // Compute sig hash for current input
             let sighash = cache.legacy_signature_hash(
                 i,
                 utxo.script_pubkey.as_script(),
                 EcdsaSighashType::All.to_u32(),
             )?;
 
-            // Sign sig hash
-            let msg = secp256k1::Message::from(sighash);
-            let sig = secp.sign_ecdsa(&msg, &secret_key);
+            // ECDSA sign, then wrap with sighash type so serialization is DER + 0x01
+            let sig = secp.sign_ecdsa(&secp256k1::Message::from(sighash), &secret_key);
+            let btc_sig = BtcSig { signature: sig, sighash_type: EcdsaSighashType::All };
+            let serialized = btc_sig.serialize();
+            let sig_bytes: &PushBytes = serialized.as_ref();
 
-            // Serialize sig as DER bytes
-            let sig_der = sig.serialize_der();
-            let sig_der_bytes: &PushBytes = <&PushBytes>::try_from(sig_der.as_ref())?;
-
-            // Build scriptSig
-            let script_sig = script::Builder::new()
-                .push_slice(sig_der_bytes) // signature
-                .push_key(&pubkey) // public key
+            // Build P2PKH scriptSig: <signature> <pubkey>
+            tx.input[i].script_sig = script::Builder::new()
+                .push_slice(sig_bytes)
+                .push_key(&pubkey)
                 .into_script();
-
-            // Attach to tx input
-            tx.input[i].script_sig = script_sig;
         }
 
-        Ok(tx)
+        Ok(serialize_hex(&tx))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr as _;
-
     use super::*;
-    use crate::utils::{load_wallet, new_rpc_client};
+    use crate::{
+        params::Receivers,
+        utxoset::{Utxo, UtxoSet},
+        utils::load_wallet,
+    };
+    use bitcoin::{Amount, Txid};
+    use std::str::FromStr;
 
-    #[test]
-    fn test_gen_transaction() {
+    const RECEIVER: &str = "tb1qerzrlxcfu24davlur5sqmgzzgsal6wusda40er";
+
+    struct MockBtcClient {
+        utxos: Vec<Utxo>,
+        fee_rate: Amount,
+    }
+
+    impl BtcClient for MockBtcClient {
+        fn get_utxo_set(&self, _addr: &bitcoin::Address) -> anyhow::Result<UtxoSet> {
+            Ok(UtxoSet::new(self.utxos.clone()))
+        }
+        fn get_balance(&self, _addr: &bitcoin::Address) -> anyhow::Result<Amount> {
+            Ok(UtxoSet::new(self.utxos.clone()).balance())
+        }
+        fn get_fee_rate(&self) -> anyhow::Result<Amount> {
+            Ok(self.fee_rate)
+        }
+    }
+
+    fn mock_client() -> MockBtcClient {
         let wallet = load_wallet();
-        let tm = TransactionManager::new(wallet);
-        let receiver = Address::from_str("tb1qerzrlxcfu24davlur5sqmgzzgsal6wusda40er").unwrap();
-        let receiver = receiver.require_network(bitcoin::Network::Testnet).unwrap();
-        let tx = tm
-            .generate_unsigned_transaction(
-                new_rpc_client(),
-                receiver,
-                Amount::from_btc(0.00001).unwrap(),
-            )
-            .unwrap();
-
-        print!("{:?}", tx);
+        let addr = wallet.address(Network::Testnet).unwrap();
+        MockBtcClient {
+            utxos: vec![Utxo {
+                txid: Txid::from_str(
+                    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                )
+                .unwrap(),
+                vout: 0,
+                amount: Amount::from_sat(100_000),
+                script_pubkey: addr.script_pubkey(),
+            }],
+            fee_rate: Amount::from_sat(1), // 1 sat/vB
+        }
     }
 
     #[test]
-    fn test_sign_transaction() {
-        let wallet = load_wallet();
-        let tm = TransactionManager::new(wallet);
-        let receiver = Address::from_str("tb1qerzrlxcfu24davlur5sqmgzzgsal6wusda40er").unwrap();
-        let receiver = receiver.require_network(bitcoin::Network::Testnet).unwrap();
-        let tx = tm
-            .generate_unsigned_transaction(
-                new_rpc_client(),
-                receiver,
-                Amount::from_btc(0.00001).unwrap(),
-            )
-            .unwrap();
+    fn test_prepare_single_receiver() {
+        let tm = TransactionManager::new(load_wallet(), Network::Testnet);
+        let receivers = Receivers::parse(&[(RECEIVER, 1000)], Network::Testnet).unwrap();
+        let params = tm.prepare(mock_client(), receivers).unwrap();
 
-        // tm.sign(tx, uxtos);
+        assert!(!params.utxos.is_empty());
+        assert!(params.receivers.len() >= 1);
+        assert_eq!(params.receivers[0].amount_sat, 1000);
+    }
+
+    #[test]
+    fn test_prepare_invalid_address_fails() {
+        let result = Receivers::parse(&[("invalid_address", 1000)], Network::Testnet);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_sign_produces_hex() {
+        let tm = TransactionManager::new(load_wallet(), Network::Testnet);
+        let receivers = Receivers::parse(&[(RECEIVER, 1000)], Network::Testnet).unwrap();
+        let params = tm.prepare(mock_client(), receivers).unwrap();
+
+        let hex = tm.sign(&params).unwrap();
+        assert!(!hex.is_empty());
+        // Valid hex string (even length, all hex chars)
+        assert!(hex.len() % 2 == 0);
+        assert!(hex.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn test_sign_is_deterministic() {
+        let tm = TransactionManager::new(load_wallet(), Network::Testnet);
+        let receivers = Receivers::parse(&[(RECEIVER, 1000)], Network::Testnet).unwrap();
+        let params = tm.prepare(mock_client(), receivers).unwrap();
+
+        let hex1 = tm.sign(&params).unwrap();
+        let hex2 = tm.sign(&params).unwrap();
+        assert_eq!(hex1, hex2);
+    }
+
+    #[test]
+    fn test_prepare_multiple_receivers() {
+        let tm = TransactionManager::new(load_wallet(), Network::Testnet);
+        let receivers =
+            Receivers::parse(&[(RECEIVER, 500), (RECEIVER, 500)], Network::Testnet).unwrap();
+        let params = tm.prepare(mock_client(), receivers).unwrap();
+
+        // At least the 2 explicit receivers
+        assert!(params.receivers.len() >= 2);
+        assert_eq!(params.receivers[0].amount_sat, 500);
+        assert_eq!(params.receivers[1].amount_sat, 500);
     }
 }

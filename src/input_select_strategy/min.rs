@@ -1,6 +1,6 @@
 use crate::{
     input_select_strategy::UtxoInputSelectStrategy,
-    uxtoset::{Utxo, UtxoSet},
+    utxoset::{Utxo, UtxoSet},
 };
 use anyhow::{Result, bail};
 use bitcoin::Amount;
@@ -12,7 +12,7 @@ impl UtxoInputSelectStrategy for MinFirstStrategy {
         &self,
         utxos: &[Utxo],
         amount: bitcoin::Amount,
-        output_count: u64,
+        output_vbytes: u64,
         fee_rate: bitcoin::Amount,
     ) -> Result<(UtxoSet, Amount)> {
         let mut utxos = utxos.to_vec();
@@ -20,10 +20,9 @@ impl UtxoInputSelectStrategy for MinFirstStrategy {
 
         let mut cur_amount = Amount::ZERO;
 
-        // Calculate fee for head and outputs
-        // 10 = virtual byte estimation of head for P2PKH legacy transaction
-        // 34 = virtual byte estimation of output for P2PKH legacy transaction
-        let mut cur_fee = fee_rate * (10 + 34 * output_count);
+        // Calculate fee for header and all outputs
+        // 10 = virtual bytes for transaction header (version, locktime, etc.)
+        let mut cur_fee = fee_rate * (10 + output_vbytes);
 
         let mut res = vec![];
 

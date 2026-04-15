@@ -5,6 +5,8 @@ use anyhow::{Context, Result};
 use bitcoin::base58;
 
 #[cfg(test)]
+use bitcoin::Network;
+#[cfg(test)]
 use crate::{btc_client::localrpc::LocalRpc, wallet::Wallet};
 
 pub fn decode_base58(src: &str) -> Result<Vec<u8>> {
@@ -19,9 +21,7 @@ pub fn as_hex(bytes: &[u8]) -> String {
 #[cfg(test)]
 pub fn load_wallet() -> Wallet {
     let wallet_path = env::var("WALLET").unwrap_or("wallet.json".to_owned());
-    let mut wallet = Wallet::new();
-    wallet.load(&wallet_path).unwrap();
-    wallet
+    Wallet::from_file(&wallet_path, Network::Testnet).unwrap()
 }
 
 #[cfg(test)]
