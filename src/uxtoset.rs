@@ -1,6 +1,6 @@
 use crate::input_select_strategy::UtxoInputSelectStrategy;
 use anyhow::Result;
-use bitcoin::{Amount, ScriptBuf, Txid};
+use bitcoin::{Amount, OutPoint, ScriptBuf, Sequence, TxIn, Txid, Witness};
 use bitcoincore_rpc::json::ListUnspentResultEntry;
 
 // Custom Utxo type to decouple the dependency to rpc client implementations
@@ -22,6 +22,24 @@ impl From<&ListUnspentResultEntry> for Utxo {
         }
     }
 }
+
+impl From<&Utxo> for TxIn {
+    fn from(value: &Utxo) -> Self {
+        TxIn {
+            previous_output: OutPoint::new(value.txid, value.vout),
+            script_sig: ScriptBuf::default(),
+            sequence: Sequence::MAX,
+            witness: Witness::default(),
+        }
+    }
+}
+
+impl From<Utxo> for TxIn {
+    fn from(value: Utxo) -> Self {
+        (&value).into()
+    }
+}
+
 pub struct UtxoSet {
     utxos: Vec<Utxo>,
 }

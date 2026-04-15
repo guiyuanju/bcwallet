@@ -53,7 +53,7 @@ fn main() -> Result<()> {
             let client = LocalRpc::new(&port, &username, &passwd)?;
             let balance = client.get_balance(&addr)?;
 
-            println!("{} satoshi", balance);
+            println!("{}", balance);
         }
         Commands::Watch => {
             let mut wallet = Wallet::new();

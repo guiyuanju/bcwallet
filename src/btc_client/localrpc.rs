@@ -86,13 +86,28 @@ impl BtcClient for LocalRpc {
         let utxos = self.get_uxto_set(addr)?;
         Ok(utxos.balance())
     }
+
+    fn get_fee_rate(&self) -> Result<Amount> {
+        // Get conservative fee with 1 block confirmation
+        let res = self
+            .client
+            .estimate_smart_fee(1, None)
+            .context("failed to get smart fee")?;
+        if let Some(errs) = res.errors {
+            bail!("failed to get smart fee: {:?}", errs);
+        }
+        if let Some(fee_rate) = res.fee_rate {
+            return Ok(fee_rate);
+        }
+        bail!("failed to get smart fee");
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::wallet::Wallet;
-    use std::{env, sync::LazyLock};
+    use crate::utils::{load_wallet, new_rpc_client};
+    use std::sync::LazyLock;
 
     struct Cache {
         addr: Address,
@@ -100,16 +115,9 @@ mod tests {
     }
 
     static CACHE: LazyLock<Cache> = LazyLock::new(|| {
-        let wallet_path = env::var("WALLET").unwrap_or("wallet.json".to_owned());
-        let port = env::var("BTC_RPC_PORT").unwrap_or("18332".to_owned());
-        let username = env::var("BTC_RPC_USER").unwrap_or("user".to_owned());
-        let passwd = env::var("BTC_RPC_PASS").unwrap_or("passwd".to_owned());
-
-        let mut wallet = Wallet::new();
-        wallet.load(&wallet_path).unwrap();
+        let wallet = load_wallet();
         let addr = wallet.address().unwrap();
-
-        let client = LocalRpc::new(&port, &username, &passwd).unwrap();
+        let client = new_rpc_client();
 
         Cache { addr, client }
     });

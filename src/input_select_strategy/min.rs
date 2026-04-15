@@ -20,7 +20,7 @@ impl UtxoInputSelectStrategy for MinFirstStrategy {
 
         let mut cur_amount = Amount::ZERO;
 
-        // calculate fee for head and outputs
+        // Calculate fee for head and outputs
         // 10 = virtual byte estimation of head for P2PKH legacy transaction
         // 34 = virtual byte estimation of output for P2PKH legacy transaction
         let mut cur_fee = fee_rate * (10 + 34 * output_count);
@@ -28,11 +28,11 @@ impl UtxoInputSelectStrategy for MinFirstStrategy {
         let mut res = vec![];
 
         for utxo in utxos {
-            // calculate fee for new input
+            // Calculate fee for new input
             // 148 = virtual byte estimation of input for P2PKH legacy transaction
             let cur_utxo_fee = fee_rate * 148;
 
-            // skip UTXO that costs more fee that its own value
+            // Skip UTXO that costs more fee that its own value
             if utxo.amount <= cur_utxo_fee {
                 continue;
             }
