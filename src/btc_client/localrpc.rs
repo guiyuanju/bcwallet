@@ -1,10 +1,9 @@
 use crate::{
     btc_client::BtcClient,
-    utils::Satoshi,
     uxtoset::{Utxo, UtxoSet},
 };
 use anyhow::{Context, Result, bail};
-use bitcoin::Address;
+use bitcoin::{Address, Amount};
 use bitcoincore_rpc::{
     Auth, Client, RpcApi,
     json::{ImportDescriptors, Timestamp},
@@ -83,9 +82,9 @@ impl BtcClient for LocalRpc {
         Ok(UtxoSet::new(utxos))
     }
 
-    fn get_balance(&self, addr: &Address) -> Result<Satoshi> {
+    fn get_balance(&self, addr: &Address) -> Result<Amount> {
         let utxos = self.get_uxto_set(addr)?;
-        Ok(utxos.utxos().iter().map(|e| e.amount.to_sat()).sum())
+        Ok(utxos.balance())
     }
 }
 

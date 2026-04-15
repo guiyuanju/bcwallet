@@ -1,4 +1,7 @@
-use crate::{input_select_strategy::UtxoInputSelectStrategy, uxtoset::Utxo};
+use crate::{
+    input_select_strategy::UtxoInputSelectStrategy,
+    uxtoset::{Utxo, UtxoSet},
+};
 use anyhow::{Result, bail};
 use bitcoin::Amount;
 
@@ -11,7 +14,7 @@ impl UtxoInputSelectStrategy for MinFirstStrategy {
         amount: bitcoin::Amount,
         output_count: u64,
         fee_rate: bitcoin::Amount,
-    ) -> Result<Vec<Utxo>> {
+    ) -> Result<(UtxoSet, Amount)> {
         let mut utxos = utxos.to_vec();
         utxos.sort_by_key(|u| u.amount);
 
@@ -38,7 +41,7 @@ impl UtxoInputSelectStrategy for MinFirstStrategy {
             cur_fee += cur_utxo_fee;
             res.push(utxo);
             if cur_amount >= amount + cur_fee {
-                return Ok(res);
+                return Ok((UtxoSet::new(res), cur_fee));
             }
         }
 

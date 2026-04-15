@@ -1,16 +1,17 @@
 pub mod min;
 
-use crate::uxtoset::Utxo;
+use crate::uxtoset::{Utxo, UtxoSet};
 use anyhow::Result;
 use bitcoin::Amount;
 
 pub trait UtxoInputSelectStrategy {
-    /// Select the set of UTXOs that reach the amount, excluding the UTXOs that cost more fee that its value.
+    /// Select the set of UTXOs that reach the amount, excluding the UTXOs that cost more fee that its value,
+    /// return (selected UTXO set, estimated fee).
     fn select_input(
         &self,
         utxos: &[Utxo],
         amount: Amount,
         output_count: u64,
         fee_rate: Amount,
-    ) -> Result<Vec<Utxo>>;
+    ) -> Result<(UtxoSet, Amount)>;
 }
