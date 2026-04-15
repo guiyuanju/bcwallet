@@ -1,4 +1,8 @@
-use crate::{btc_client::BtcClient, utils::Satoshi, uxtoset::Utxo};
+use crate::{
+    btc_client::BtcClient,
+    utils::Satoshi,
+    uxtoset::{Utxo, UtxoSet},
+};
 use anyhow::{Context, Result, bail};
 use bitcoin::Address;
 use bitcoincore_rpc::{
@@ -66,9 +70,9 @@ impl LocalRpc {
 }
 
 impl BtcClient for LocalRpc {
-    fn get_uxtos(&self, addr: &Address) -> Result<Vec<Utxo>> {
+    fn get_uxto_set(&self, addr: &Address) -> Result<UtxoSet> {
         // get all transactions confirmed by at least one block
-        let res = self
+        let utxos = self
             .client
             .list_unspent(Some(1), None, Some(&[addr]), Some(false), None)
             .context("failed to list unspent")?
@@ -76,12 +80,12 @@ impl BtcClient for LocalRpc {
             .map(|e| e.into())
             .collect::<Vec<Utxo>>();
 
-        Ok(res)
+        Ok(UtxoSet::new(utxos))
     }
 
     fn get_balance(&self, addr: &Address) -> Result<Satoshi> {
-        let utxos = self.get_uxtos(addr)?;
-        Ok(utxos.iter().map(|e| e.amount.to_sat()).sum())
+        let utxos = self.get_uxto_set(addr)?;
+        Ok(utxos.utxos().iter().map(|e| e.amount.to_sat()).sum())
     }
 }
 
@@ -115,7 +119,7 @@ mod tests {
     fn test_get_utxos() {
         let addr = &CACHE.addr;
         let client = &CACHE.client;
-        let res = client.get_uxtos(&addr).unwrap();
-        println!("{:?}", res);
+        let res = client.get_uxto_set(&addr).unwrap();
+        println!("{:?}", res.utxos());
     }
 }

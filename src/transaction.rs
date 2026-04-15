@@ -21,8 +21,7 @@ impl<T: BtcClient> TransactionManager<T> {
         amount: Amount,
         fee_rate: Amount,
     ) -> Result<Transaction> {
-        let utxos = self.client.get_uxtos(&self.wallet.address()?)?;
-        let utxo_set = UtxoSet::new(utxos, MinFirstStrategy());
+        let utxo_set = self.client.get_uxto_set(&self.wallet.address()?)?;
         // Fixme: calculate output count dynamically
         let inputs = utxo_set.select_input(amount, 2, fee_rate)?;
         unimplemented!()

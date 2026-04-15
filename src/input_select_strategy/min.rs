@@ -6,6 +6,7 @@ use bitcoin::Amount;
 pub struct MinFirstStrategy();
 impl UtxoInputSelectStrategy for MinFirstStrategy {
     fn select_input(
+        &self,
         utxos: &[Utxo],
         amount: bitcoin::Amount,
         output_count: u64,

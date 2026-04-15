@@ -1,4 +1,7 @@
-use crate::{input_select_strategy::UtxoInputSelectStrategy, utils::Satoshi};
+use crate::{
+    input_select_strategy::{UtxoInputSelectStrategy, min::MinFirstStrategy},
+    utils::Satoshi,
+};
 use anyhow::Result;
 use bitcoin::{Amount, ScriptBuf, Txid};
 use bitcoincore_rpc::json::ListUnspentResultEntry;
@@ -22,16 +25,16 @@ impl From<&ListUnspentResultEntry> for Utxo {
         }
     }
 }
-pub struct UtxoSet<T: UtxoInputSelectStrategy> {
+pub struct UtxoSet {
     utxos: Vec<Utxo>,
-    select_strategy: T,
+    select_strategy: Box<dyn UtxoInputSelectStrategy>,
 }
 
-impl<T: UtxoInputSelectStrategy> UtxoSet<T> {
-    pub fn new(utxos: Vec<Utxo>, select_strategy: T) -> Self {
+impl UtxoSet {
+    pub fn new(utxos: Vec<Utxo>) -> Self {
         Self {
             utxos,
-            select_strategy,
+            select_strategy: Box::new(MinFirstStrategy()),
         }
     }
 
@@ -41,10 +44,15 @@ impl<T: UtxoInputSelectStrategy> UtxoSet<T> {
         output_count: u64,
         fee_rate: Amount,
     ) -> Result<Vec<Utxo>> {
-        T::select_input(&self.utxos, amount, output_count, fee_rate)
+        self.select_strategy
+            .select_input(&self.utxos, amount, output_count, fee_rate)
     }
 
     pub fn balance(&self) -> Satoshi {
         self.utxos.iter().map(|e| e.amount.to_sat()).sum()
+    }
+
+    pub fn utxos(&self) -> &[Utxo] {
+        &self.utxos
     }
 }
