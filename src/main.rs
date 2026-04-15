@@ -1,12 +1,12 @@
-mod btcclient;
-mod localrpc;
-mod types;
+mod btc_client;
+mod input_select_strategy;
+mod transaction;
 mod utils;
+mod uxtoset;
 mod wallet;
 
 use crate::{
-    btcclient::BtcClient,
-    localrpc::LocalRpc,
+    btc_client::{BtcClient, localrpc::LocalRpc},
     utils::{as_hex, decode_base58},
     wallet::Wallet,
 };

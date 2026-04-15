@@ -1,6 +1,8 @@
 use anyhow::{Context, Result};
 use bitcoin::base58;
 
+pub type Satoshi = u64;
+
 pub fn decode_base58(src: &str) -> Result<Vec<u8>> {
     base58::decode(src).context("failed to decode as base58")
 }

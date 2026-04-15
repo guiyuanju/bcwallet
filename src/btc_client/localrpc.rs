@@ -1,7 +1,4 @@
-use crate::{
-    btcclient::{BtcClient, Utxo},
-    types::Satoshi,
-};
+use crate::{btc_client::BtcClient, utils::Satoshi, uxtoset::Utxo};
 use anyhow::{Context, Result, bail};
 use bitcoin::Address;
 use bitcoincore_rpc::{
