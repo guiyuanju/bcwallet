@@ -1,9 +1,8 @@
-use crate::input_select_strategy::UtxoInputSelectStrategy;
-use anyhow::Result;
+use anyhow::{Result, bail};
 use bitcoin::{Amount, OutPoint, ScriptBuf, Sequence, TxIn, Txid, Witness};
 use bitcoincore_rpc::json::ListUnspentResultEntry;
 
-// Custom Utxo type to decouple the dependency to rpc client implementations
+/// Custom Utxo type to decouple from RPC client implementations.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Utxo {
     pub txid: Txid,
@@ -49,17 +48,42 @@ impl UtxoSet {
         Self { utxos }
     }
 
-    pub fn select_input<T>(
+    /// Select the smallest UTXOs that cover `amount` + fees.
+    /// Skips UTXOs whose value is less than the fee to spend them.
+    /// Returns (selected UTXO set, estimated fee).
+    pub fn select_input(
         &self,
         amount: Amount,
         output_vbytes: u64,
         fee_rate: Amount,
-        strategy: T,
-    ) -> Result<(UtxoSet, Amount)>
-    where
-        T: UtxoInputSelectStrategy,
-    {
-        strategy.select_input(&self.utxos, amount, output_vbytes, fee_rate)
+    ) -> Result<(UtxoSet, Amount)> {
+        let mut utxos = self.utxos.clone();
+        utxos.sort_by_key(|u| u.amount);
+
+        let mut cur_amount = Amount::ZERO;
+        // 10 vbytes for transaction header (version, locktime, etc.)
+        let mut cur_fee = fee_rate * (10 + output_vbytes);
+        let mut selected = vec![];
+
+        for utxo in utxos {
+            // 148 vbytes per P2PKH input
+            let input_fee = fee_rate * 148;
+
+            // Skip UTXOs that cost more in fees than they're worth
+            if utxo.amount <= input_fee {
+                continue;
+            }
+
+            cur_amount += utxo.amount;
+            cur_fee += input_fee;
+            selected.push(utxo);
+
+            if cur_amount >= amount + cur_fee {
+                return Ok((UtxoSet::new(selected), cur_fee));
+            }
+        }
+
+        bail!("not enough balance");
     }
 
     pub fn balance(&self) -> Amount {

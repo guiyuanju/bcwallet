@@ -1,20 +1,17 @@
-mod btc_client;
-mod input_select_strategy;
+mod btcclient;
 mod params;
 mod transaction;
-mod utils;
 mod utxoset;
 mod wallet;
 
 use crate::{
-    btc_client::{BtcClient, localrpc::LocalRpc},
+    btcclient::{BtcClient, LocalRpc},
     params::{Receivers, TransactionParams},
     transaction::TransactionManager,
-    utils::{as_hex, decode_base58},
     wallet::Wallet,
 };
 use anyhow::{Context, Result, bail};
-use bitcoin::Network;
+use bitcoin::{Network, base58};
 use clap::{Parser, Subcommand};
 use std::env;
 
@@ -96,18 +93,17 @@ fn main() -> Result<()> {
         }
         Commands::Balance => {
             let wallet = cfg.wallet()?;
-            let addr = wallet.address(cfg.network)?;
-            let balance = cfg.rpc_client()?.get_balance(&addr)?;
+            let balance = cfg.rpc_client()?.get_balance(wallet.address())?;
             println!("{}", balance);
         }
         Commands::Watch => {
             let wallet = cfg.wallet()?;
-            let addr = wallet.address(cfg.network)?;
-            cfg.rpc_client()?.watch_address(&[&addr])?;
+            cfg.rpc_client()?.watch_address(&[wallet.address()])?;
         }
         Commands::DecodeBase58 { src } => {
-            let bytes = decode_base58(&src)?;
-            println!("{:?}", as_hex(&bytes));
+            let bytes = base58::decode(&src).context("failed to decode base58")?;
+            let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+            println!("{hex}");
         }
         Commands::Prepare { receiver, output } => {
             let raw: Vec<(&str, u64)> = receiver

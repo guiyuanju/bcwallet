@@ -1,6 +1,5 @@
 use crate::{
-    btc_client::BtcClient,
-    input_select_strategy::min::MinFirstStrategy,
+    btcclient::BtcClient,
     params::{Receiver, Receivers, TransactionParams},
     wallet::Wallet,
 };
@@ -34,22 +33,18 @@ impl TransactionManager {
         let total_out = receivers.total_out();
 
         // Select inputs from UTXO set that cover amount and fee
-        let utxo_set = client.get_utxo_set(&self.wallet.address(self.network)?)?;
+        let utxo_set = client.get_utxo_set(self.wallet.address())?;
         // P2PKH change output = 34 vbytes
         let output_vbytes = receivers.output_vbytes(self.network)? + 34;
-        let (inputs, fee) = utxo_set.select_input(
-            total_out,
-            output_vbytes,
-            client.get_fee_rate()?,
-            MinFirstStrategy(),
-        )?;
+        let (inputs, fee) =
+            utxo_set.select_input(total_out, output_vbytes, client.get_fee_rate()?)?;
 
         // Calculate change, skip if it's a dust
-        let sender = self.wallet.address(self.network)?;
+        let sender = self.wallet.address();
         let dust_limit = TxOut::minimal_non_dust(sender.script_pubkey());
         let raw_change = inputs.balance() - total_out - fee;
         if raw_change >= dust_limit.value {
-            receivers.push(Receiver::new(&sender, raw_change));
+            receivers.push(Receiver::new(sender, raw_change));
         }
 
         Ok(TransactionParams::new(receivers.into_inner(), &inputs))
@@ -61,8 +56,8 @@ impl TransactionManager {
         let utxo_set = params.to_utxo_set()?;
         let mut tx = params.to_unsigned_tx(&utxo_set, self.network)?;
 
-        let secret_key = self.wallet.secret_key()?;
-        let pubkey = self.wallet.public_key()?;
+        let secret_key = self.wallet.secret_key();
+        let pubkey = self.wallet.public_key();
         let secp = Secp256k1::new();
 
         for (i, utxo) in utxo_set.utxos().iter().enumerate() {
@@ -75,15 +70,18 @@ impl TransactionManager {
             )?;
 
             // ECDSA sign, then wrap with sighash type so serialization is DER + 0x01
-            let sig = secp.sign_ecdsa(&secp256k1::Message::from(sighash), &secret_key);
-            let btc_sig = BtcSig { signature: sig, sighash_type: EcdsaSighashType::All };
+            let sig = secp.sign_ecdsa(&secp256k1::Message::from(sighash), secret_key);
+            let btc_sig = BtcSig {
+                signature: sig,
+                sighash_type: EcdsaSighashType::All,
+            };
             let serialized = btc_sig.serialize();
             let sig_bytes: &PushBytes = serialized.as_ref();
 
             // Build P2PKH scriptSig: <signature> <pubkey>
             tx.input[i].script_sig = script::Builder::new()
                 .push_slice(sig_bytes)
-                .push_key(&pubkey)
+                .push_key(pubkey)
                 .into_script();
         }
 
@@ -97,12 +95,17 @@ mod tests {
     use crate::{
         params::Receivers,
         utxoset::{Utxo, UtxoSet},
-        utils::load_wallet,
+        wallet::Wallet,
     };
-    use bitcoin::{Amount, Txid};
-    use std::str::FromStr;
+    use bitcoin::{Amount, Network, Txid};
+    use std::{env, str::FromStr};
 
     const RECEIVER: &str = "tb1qerzrlxcfu24davlur5sqmgzzgsal6wusda40er";
+
+    fn load_wallet() -> Wallet {
+        let path = env::var("WALLET").unwrap_or("wallet.json".to_owned());
+        Wallet::from_file(&path, Network::Testnet).unwrap()
+    }
 
     struct MockBtcClient {
         utxos: Vec<Utxo>,
@@ -123,7 +126,6 @@ mod tests {
 
     fn mock_client() -> MockBtcClient {
         let wallet = load_wallet();
-        let addr = wallet.address(Network::Testnet).unwrap();
         MockBtcClient {
             utxos: vec![Utxo {
                 txid: Txid::from_str(
@@ -132,7 +134,7 @@ mod tests {
                 .unwrap(),
                 vout: 0,
                 amount: Amount::from_sat(100_000),
-                script_pubkey: addr.script_pubkey(),
+                script_pubkey: wallet.address().script_pubkey(),
             }],
             fee_rate: Amount::from_sat(1), // 1 sat/vB
         }

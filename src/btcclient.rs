@@ -1,7 +1,4 @@
-use crate::{
-    btc_client::BtcClient,
-    utxoset::{Utxo, UtxoSet},
-};
+use crate::utxoset::{Utxo, UtxoSet};
 use anyhow::{Context, Result, bail};
 use bitcoin::{Address, Amount};
 use bitcoincore_rpc::{
@@ -9,42 +6,42 @@ use bitcoincore_rpc::{
     json::{ImportDescriptors, Timestamp},
 };
 
-/// The client used to communicate with local Bitcoin Core node.
+pub trait BtcClient {
+    fn get_utxo_set(&self, addr: &Address) -> Result<UtxoSet>;
+    fn get_balance(&self, addr: &Address) -> Result<Amount>;
+    fn get_fee_rate(&self) -> Result<Amount>;
+}
+
+/// Client for communicating with a local Bitcoin Core node.
 pub struct LocalRpc {
     client: Client,
 }
 
 impl LocalRpc {
     pub fn new(port: &str, username: &str, passwd: &str) -> Result<Self> {
-        // Security concern: password is stored in memory (client).
         let url = format!("http://127.0.0.1:{port}");
         let auth = Auth::UserPass(username.to_owned(), passwd.to_owned());
         let client = Client::new(&url, auth).context("failed to connect to local rpc client")?;
-
         Ok(Self { client })
     }
 
-    /// Set the address to scan and watch.
+    /// Import address descriptors so Bitcoin Core watches them.
     pub fn watch_address(self, addrs: &[&Address]) -> Result<()> {
         for &addr in addrs {
             self.import_descriptor(addr)?;
         }
-
         Ok(())
     }
 
     fn import_descriptor(&self, addr: &Address) -> Result<()> {
-        // compose the correct descriptor format
         let addr_descrip = format!("addr({addr})");
 
-        // get checksumed descriptor
         let descriptor = self
             .client
             .get_descriptor_info(&addr_descrip)
             .context("failed to get checksumed descriptor")?
             .descriptor;
 
-        // import descriptor for bitcoin core to watch
         let mut req = ImportDescriptors::default();
         req.descriptor = descriptor;
         req.timestamp = Timestamp::Now;
@@ -54,13 +51,13 @@ impl LocalRpc {
             .import_descriptors(req)
             .context("failed to import descriptors")?;
 
-        // check result
         for r in res {
             if !r.success {
-                bail!(format!(
+                bail!(
                     "failed to import descriptor: {:?}, {:?}",
-                    r.warnings, r.error
-                ))
+                    r.warnings,
+                    r.error
+                )
             }
         }
 
@@ -70,7 +67,6 @@ impl LocalRpc {
 
 impl BtcClient for LocalRpc {
     fn get_utxo_set(&self, addr: &Address) -> Result<UtxoSet> {
-        // get all transactions confirmed by at least one block
         let utxos = self
             .client
             .list_unspent(Some(1), None, Some(&[addr]), Some(false), None)
@@ -83,12 +79,10 @@ impl BtcClient for LocalRpc {
     }
 
     fn get_balance(&self, addr: &Address) -> Result<Amount> {
-        let utxos = self.get_utxo_set(addr)?;
-        Ok(utxos.balance())
+        Ok(self.get_utxo_set(addr)?.balance())
     }
 
     fn get_fee_rate(&self) -> Result<Amount> {
-        // Get conservative fee with 1 block confirmation
         let res = self
             .client
             .estimate_smart_fee(1, None)
@@ -107,9 +101,21 @@ impl BtcClient for LocalRpc {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::utils::{load_wallet, new_rpc_client};
+    use crate::wallet::Wallet;
     use bitcoin::Network;
-    use std::sync::LazyLock;
+    use std::{env, sync::LazyLock};
+
+    fn load_wallet() -> Wallet {
+        let path = env::var("WALLET").unwrap_or("wallet.json".to_owned());
+        Wallet::from_file(&path, Network::Testnet).unwrap()
+    }
+
+    fn new_rpc_client() -> LocalRpc {
+        let port = env::var("BTC_RPC_PORT").unwrap_or("18332".to_owned());
+        let user = env::var("BTC_RPC_USER").unwrap_or("user".to_owned());
+        let pass = env::var("BTC_RPC_PASS").unwrap_or("passwd".to_owned());
+        LocalRpc::new(&port, &user, &pass).unwrap()
+    }
 
     struct Cache {
         addr: Address,
@@ -118,17 +124,14 @@ mod tests {
 
     static CACHE: LazyLock<Cache> = LazyLock::new(|| {
         let wallet = load_wallet();
-        let addr = wallet.address(Network::Testnet).unwrap();
+        let addr = wallet.address().clone();
         let client = new_rpc_client();
-
         Cache { addr, client }
     });
 
     #[test]
     fn test_get_utxos() {
-        let addr = &CACHE.addr;
-        let client = &CACHE.client;
-        let res = client.get_utxo_set(&addr).unwrap();
+        let res = CACHE.client.get_utxo_set(&CACHE.addr).unwrap();
         println!("{:?}", res.utxos());
     }
 }

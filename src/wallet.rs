@@ -5,57 +5,73 @@ use serde::{Deserialize, Serialize};
 use std::{
     fs::{File, OpenOptions},
     io::{BufReader, Write},
-    str::FromStr,
 };
 
+/// JSON representation of wallet on disk.
 #[derive(Serialize, Deserialize)]
+struct WalletFile {
+    private_key: String,
+    address: String,
+}
+
+/// In-memory wallet with pre-parsed key material.
 pub struct Wallet {
-    private_key: String, // Base58 encoded WIF secret key
-    address: String,     // Base58 encoded compressed P2PKH
+    wif: String,
+    secret_key: SecretKey,
+    public_key: PublicKey,
+    address: Address,
 }
 
 impl Wallet {
-    /// Generate a new wallet with a fresh keypair.
     pub fn generate(network: Network) -> Self {
         let secp = Secp256k1::new();
         let (secret_key, public_key) = secp.generate_keypair(&mut OsRng);
-        let private_key = PrivateKey::new(secret_key, network);
-        let address = Address::p2pkh(PublicKey::new(public_key), network);
+        let public_key = PublicKey::new(public_key);
+        let address = Address::p2pkh(public_key, network);
+        let wif = PrivateKey::new(secret_key, network).to_wif();
 
         Self {
-            private_key: private_key.to_wif(),
-            address: address.to_string(),
+            wif,
+            secret_key,
+            public_key,
+            address,
         }
     }
 
-    /// As bitcoin::PrivateKey.
-    pub fn private_key(&self) -> Result<PrivateKey> {
-        PrivateKey::from_wif(&self.private_key).context("failed to convert string to private key")
-    }
+    pub fn from_file(file_path: &str, network: Network) -> Result<Self> {
+        let file = File::open(file_path).context("failed to open wallet file")?;
+        let reader = BufReader::new(file);
+        let wf: WalletFile =
+            serde_json::from_reader(reader).context("failed to deserialize wallet file")?;
 
-    /// Get secret_key from private key.
-    pub fn secret_key(&self) -> Result<SecretKey> {
-        Ok(self.private_key()?.inner)
-    }
-
-    /// As bitcoin::PublicKey.
-    pub fn public_key(&self) -> Result<PublicKey> {
+        let privkey =
+            PrivateKey::from_wif(&wf.private_key).context("failed to parse private key WIF")?;
         let secp = Secp256k1::new();
-        let pubkey = secp256k1::PublicKey::from_secret_key(&secp, &self.private_key()?.inner);
-        Ok(PublicKey::new(pubkey))
+        let public_key = PublicKey::from_private_key(&secp, &privkey);
+        let expected_addr = Address::p2pkh(public_key, network);
+
+        if expected_addr.to_string() != wf.address {
+            bail!(
+                "wallet address does not match private key for network {}",
+                network
+            );
+        }
+
+        Ok(Self {
+            wif: wf.private_key,
+            secret_key: privkey.inner,
+            public_key,
+            address: expected_addr,
+        })
     }
 
-    /// As bitcoin::Address.
-    pub fn address(&self, network: Network) -> Result<Address> {
-        let addr = Address::from_str(&self.address)?;
-        addr.require_network(network)
-            .context("address network mismatch")
-    }
-
-    /// Save current wallet to file, fail if already exists.
     pub fn save(&self, file_path: &str) -> Result<()> {
+        let wf = WalletFile {
+            private_key: self.wif.clone(),
+            address: self.address.to_string(),
+        };
         let json =
-            serde_json::to_string_pretty(self).context("failed to serialize wallet to json")?;
+            serde_json::to_string_pretty(&wf).context("failed to serialize wallet to json")?;
         let mut file = OpenOptions::new()
             .create_new(true)
             .write(true)
@@ -63,28 +79,16 @@ impl Wallet {
         writeln!(file, "{}", json).context("failed to write to wallet")
     }
 
-    /// Load wallet from file and validate that the address matches the private key.
-    pub fn from_file(file_path: &str, network: Network) -> Result<Self> {
-        let file = File::open(file_path).context("failed to open wallet file")?;
-        let reader = BufReader::new(file);
-        let wallet: Self =
-            serde_json::from_reader(reader).context("failed to deserialize wallet file")?;
-        wallet.validate(network)?;
-        Ok(wallet)
+    pub fn secret_key(&self) -> &SecretKey {
+        &self.secret_key
     }
 
-    fn validate(&self, network: Network) -> Result<()> {
-        let secp = Secp256k1::new();
-        let privkey = self.private_key()?;
-        let pubkey = PublicKey::from_private_key(&secp, &privkey);
-        let expected = Address::p2pkh(pubkey, network);
-        if expected.to_string() != self.address {
-            bail!(
-                "wallet address does not match private key for network {}",
-                network
-            );
-        }
-        Ok(())
+    pub fn public_key(&self) -> &PublicKey {
+        &self.public_key
+    }
+
+    pub fn address(&self) -> &Address {
+        &self.address
     }
 }
 
@@ -96,12 +100,12 @@ mod tests {
     fn test_key_match_addr() {
         let wallet = Wallet::generate(Network::Testnet);
 
-        let scep = Secp256k1::new();
+        let secp = Secp256k1::new();
         let addr = Address::p2pkh(
-            PublicKey::from_private_key(&scep, &wallet.private_key().unwrap()),
+            PublicKey::from_private_key(&secp, &PrivateKey::from_wif(&wallet.wif).unwrap()),
             Network::Testnet,
         );
 
-        assert_eq!(addr, wallet.address(Network::Testnet).unwrap())
+        assert_eq!(&addr, wallet.address());
     }
 }
