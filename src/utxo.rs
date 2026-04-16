@@ -1,3 +1,8 @@
+//! A boudary used to decouple the UTXO implementation details,
+//! which may be different among different `BtcClient`s.
+//! Also provides convenient transformation trait for UTXO to and from
+//! other types.
+
 use anyhow::{bail, Result};
 use bitcoin::{Address, Amount, OutPoint, ScriptBuf, Sequence, TxIn, Txid, Witness};
 use bitcoincore_rpc::json::ListUnspentResultEntry;

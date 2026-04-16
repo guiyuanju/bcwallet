@@ -1,3 +1,9 @@
+//! Defines a trait `BtcClient` which abstracted the behavior expected for a client.
+//! For example, a Bitcoin Node RPC can be seen as a BtcClient, so as a REST api
+//! provided by some server.
+//!
+//! An `RpcClient` has been implemented for use with local Bitcoin Core Node.
+
 use crate::utxo::Utxo;
 use anyhow::{bail, Context, Result};
 use bitcoin::{Address, Amount, Txid};
@@ -6,6 +12,7 @@ use bitcoincore_rpc::{
     Auth, Client, RpcApi,
 };
 
+/// The abstraction for a Bitcoin client
 pub trait BtcClient {
     fn get_utxos(&self, addr: &Address) -> Result<Vec<Utxo>>;
     fn get_balance(&self, addr: &Address) -> Result<Amount> {

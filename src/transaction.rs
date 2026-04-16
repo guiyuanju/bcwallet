@@ -1,3 +1,5 @@
+//! The core of generate and sign unsigned transactions.
+
 use crate::{
     btcclient::BtcClient,
     params::{output_vbytes, Receiver, TransactionParam},

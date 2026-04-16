@@ -1,3 +1,7 @@
+//! Defines the data transfer format for encoding and decoding e.g. `params.json`.
+//! The online process produce these types of data, persisted to disk,
+//! and read by offline process part and sign.
+
 use crate::utxo::Utxo;
 use anyhow::{Context, Result};
 use bitcoin::{absolute, transaction::Version, Address, Amount, Network, Transaction, TxOut};

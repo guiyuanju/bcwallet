@@ -1,3 +1,11 @@
+//! Types and methods for wallet related operatios,
+//! such as generate, load and save.
+//!
+//! Everytime the wallet is loaded, a network check need to done,
+//! and then convert into an checked type, which pushes the validation
+//! to the boundary of the system, and catch the information inside
+//! the type system, improving maintainability.
+
 use anyhow::{bail, Context, Result};
 use bitcoin::{Address, Network, PrivateKey, PublicKey};
 use secp256k1::{rand::rngs::OsRng, Secp256k1, SecretKey};
