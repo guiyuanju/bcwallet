@@ -1,0 +1,20 @@
+{
+  "receivers": [
+    {
+      "address": "tb1qerzrlxcfu24davlur5sqmgzzgsal6wusda40er",
+      "amount_sat": 1000
+    },
+    {
+      "address": "mwqmgMkf6ZsX2wxSK6GA2JRMVswBo29UWX",
+      "amount_sat": 169833
+    }
+  ],
+  "utxos": [
+    {
+      "txid": "7924ac89b95d56db5bb693bf13aeb3f0c0b17b4aabc01c1c8422d474d9964f12",
+      "vout": 0,
+      "amount_sat": 171056,
+      "script_pubkey": "76a914b3110df342d2dceb87ef5a00134d34e4048e27cf88ac"
+    }
+  ]
+}

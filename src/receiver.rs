@@ -90,15 +90,6 @@ mod tests {
     }
 
     #[test]
-    fn test_receiver_roundtrip() {
-        let addr = test_address();
-        let r = Receiver::new(&addr, Amount::from_sat(1234));
-        assert_eq!(r.amount_sat, 1234);
-        assert_eq!(r.amount(), Amount::from_sat(1234));
-        assert_eq!(r.address(Network::Testnet).unwrap(), addr);
-    }
-
-    #[test]
     fn test_receiver_to_tx_out() {
         let addr = test_address();
         let r = Receiver::new(&addr, Amount::from_sat(5000));

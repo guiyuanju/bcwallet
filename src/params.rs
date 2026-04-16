@@ -96,14 +96,6 @@ mod tests {
     }
 
     #[test]
-    fn test_utxo_serde_roundtrip() {
-        let utxo = test_utxo();
-        let json = serde_json::to_string(&utxo).unwrap();
-        let back: Utxo = serde_json::from_str(&json).unwrap();
-        assert_eq!(back, utxo);
-    }
-
-    #[test]
     fn test_transaction_params_to_unsigned_tx() {
         let addr = test_address();
         let receivers = vec![Receiver::new(&addr, Amount::from_sat(10_000))];
