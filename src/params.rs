@@ -25,7 +25,7 @@ impl TransactionParams {
     }
 
     /// Construct an unsigned transaction from these params
-    pub fn to_unsigned_tx(&self, utxos: &[Utxo], network: Network) -> Result<Transaction> {
+    pub fn to_unsigned_tx(&self, network: Network) -> Result<Transaction> {
         let outputs: Vec<TxOut> = self
             .receivers
             .iter()
@@ -35,7 +35,7 @@ impl TransactionParams {
         let tx = Transaction {
             version: Version::TWO,
             lock_time: LockTime::ZERO,
-            input: utxos.iter().map(|u| u.into()).collect(),
+            input: self.utxos.iter().map(|u| u.into()).collect(),
             output: outputs,
         };
 
