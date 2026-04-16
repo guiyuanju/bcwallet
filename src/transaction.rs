@@ -30,7 +30,7 @@ impl TransactionManager {
     }
 
     /// Prepare transaction params by fetching UTXOs online,
-    /// change is computed and appended as a receiver automatically
+    /// change is computed and appended as a receiver automatically.
     pub fn prepare<T: BtcClient>(
         &self,
         client: &T,
@@ -57,10 +57,10 @@ impl TransactionManager {
         Ok(TransactionParam::new(receivers, selected))
     }
 
-    /// Sign a transaction from params (offline, no network access)
-    /// Returns the broadcast-ready hex string
+    /// Sign a transaction from params (offline, no network access),
+    /// returns the broadcast-ready hex string.
     pub fn sign(&self, params: &TransactionParam) -> Result<String> {
-        let mut tx = Self::build_unsigned_tx(params);
+        let mut tx: Transaction = params.into();
 
         let secret_key = &self.wallet.secret_key;
         let pubkey = &self.wallet.public_key;
@@ -93,16 +93,6 @@ impl TransactionManager {
         }
 
         Ok(serialize_hex(&tx))
-    }
-
-    fn build_unsigned_tx(params: &TransactionParam) -> Transaction {
-        let outputs: Vec<TxOut> = params.receivers.iter().map(TxOut::from).collect();
-        Transaction {
-            version: Version::TWO,
-            lock_time: LockTime::ZERO,
-            input: params.utxos.iter().map(|u| u.into()).collect(),
-            output: outputs,
-        }
     }
 }
 

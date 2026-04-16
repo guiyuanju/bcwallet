@@ -1,6 +1,6 @@
 use crate::utxo::Utxo;
 use anyhow::{Context, Result};
-use bitcoin::{Address, Amount, Network, TxOut};
+use bitcoin::{absolute, transaction::Version, Address, Amount, Network, Transaction, TxOut};
 use serde::{Deserialize, Serialize};
 use std::{
     fs::File,
@@ -8,11 +8,7 @@ use std::{
     str::FromStr,
 };
 
-// ── Receiver ────────────────────────────────────────────────────────
-
-/// Unchecked receiver parsed from JSON or CLI input.
-///
-/// Implements `FromStr` so clap can parse `"address:amount_sat"` directly.
+/// Unchecked receiver parsed from JSON or CLI input
 #[derive(Serialize, Deserialize, Clone)]
 pub struct ReceiverUnchecked {
     pub address: String,
@@ -20,7 +16,7 @@ pub struct ReceiverUnchecked {
 }
 
 impl ReceiverUnchecked {
-    /// Validate address for the given network.
+    /// Validate address for the given network
     pub fn check(self, network: Network) -> Result<Receiver> {
         let address = Address::from_str(&self.address)?
             .require_network(network)
@@ -32,6 +28,7 @@ impl ReceiverUnchecked {
     }
 }
 
+// For clap to parse command line argument
 impl FromStr for ReceiverUnchecked {
     type Err = anyhow::Error;
 
@@ -56,7 +53,7 @@ impl From<&Receiver> for ReceiverUnchecked {
     }
 }
 
-/// A validated receiver with a network-checked address and amount.
+/// A validated receiver with a network-checked address and amount
 pub struct Receiver {
     pub address: Address,
     pub amount: Amount,
@@ -86,15 +83,13 @@ impl From<&Receiver> for TxOut {
     }
 }
 
-/// Sum the serialized vbytes of all outputs (8 bytes value + 1 byte script len + script).
+/// Sum the serialized vbytes of all outputs (8 bytes value + 1 byte script len + script)
 pub fn output_vbytes(receivers: &[Receiver]) -> u64 {
     receivers
         .iter()
         .map(|r| 8 + 1 + r.address.script_pubkey().len() as u64)
         .sum()
 }
-
-// ── Transaction Params ──────────────────────────────────────────────
 
 /// Unchecked transaction parameters parsed from JSON
 #[derive(Serialize, Deserialize)]
@@ -154,6 +149,18 @@ impl TransactionParam {
             &self.utxos,
         );
         unchecked.save_as_file(path)
+    }
+}
+
+impl From<&TransactionParam> for Transaction {
+    fn from(value: &TransactionParam) -> Self {
+        let outputs: Vec<TxOut> = value.receivers.iter().map(TxOut::from).collect();
+        Transaction {
+            version: Version::TWO,
+            lock_time: absolute::LockTime::ZERO,
+            input: value.utxos.iter().map(|u| u.into()).collect(),
+            output: outputs,
+        }
     }
 }
 

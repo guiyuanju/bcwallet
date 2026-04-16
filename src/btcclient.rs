@@ -16,7 +16,7 @@ pub trait BtcClient {
     fn send_raw_transaction(&self, tx_hex: &str) -> Result<Txid>;
 }
 
-/// Client for communicating with a local Bitcoin Core node.
+/// Client for communicating with a local Bitcoin Core node
 pub struct RpcClient {
     client: Client,
 }
