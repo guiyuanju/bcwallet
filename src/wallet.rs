@@ -24,6 +24,7 @@ pub struct Wallet {
 }
 
 impl Wallet {
+    #[warn(dead_code)]
     pub fn new(pk: &str, addr: &str, network: Network) -> Result<Self> {
         Wallet::parse(
             WalletUnchecked {

@@ -25,7 +25,7 @@ impl Utxo {
     pub fn new(txid: &str, vout: u32, amount: u64, addr: Address) -> Result<Self> {
         Ok(Utxo {
             txid: Txid::from_str(txid)?,
-            vout: vout,
+            vout,
             amount: Amount::from_sat(amount),
             script_pubkey: addr.script_pubkey(),
         })
