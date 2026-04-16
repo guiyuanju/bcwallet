@@ -51,19 +51,22 @@ impl TransactionManager {
             receivers.push(Receiver::new(sender, raw_change));
         }
 
-        Ok(TransactionParams::new(receivers.into_inner(), &inputs))
+        Ok(TransactionParams::new(
+            receivers.into_inner(),
+            inputs.utxos(),
+        ))
     }
 
     /// Sign a transaction from params (offline, no network access)
     /// Returns the broadcast-ready hex string
     pub fn sign(&self, params: &TransactionParams) -> Result<String> {
-        let utxo_set = params.to_utxo_set();
-        let mut tx = params.to_unsigned_tx(&utxo_set, self.wallet.network)?;
+        let utxos = &params.utxos;
+        let mut tx = params.to_unsigned_tx(utxos, self.wallet.network)?;
 
         let secret_key = &self.wallet.secret_key;
         let pubkey = &self.wallet.public_key;
 
-        for (i, utxo) in utxo_set.utxos().iter().enumerate() {
+        for (i, utxo) in utxos.iter().enumerate() {
             // Compute the legacy sighash for this input
             let cache = SighashCache::new(&tx);
             let sighash = cache.legacy_signature_hash(

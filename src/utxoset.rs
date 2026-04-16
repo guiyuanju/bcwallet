@@ -5,9 +5,9 @@ use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
 /// Estimated vbytes for a legacy P2PKH input (script_sig: push sig + push pubkey).
-pub(crate) const P2PKH_INPUT_VBYTES: u64 = 148;
+pub const P2PKH_INPUT_VBYTES: u64 = 148;
 /// Estimated vbytes for a legacy P2PKH output (8 value + 1 script_len + 25 script).
-pub(crate) const P2PKH_OUTPUT_VBYTES: u64 = 34;
+pub const P2PKH_OUTPUT_VBYTES: u64 = 34;
 /// Overhead vbytes for a transaction (version + locktime + input/output counts).
 const TX_OVERHEAD_VBYTES: u64 = 10;
 

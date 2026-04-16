@@ -1,5 +1,5 @@
 use crate::receiver::Receiver;
-use crate::utxoset::{Utxo, UtxoSet};
+use crate::utxoset::Utxo;
 use anyhow::{Context, Result};
 use bitcoin::{absolute::LockTime, transaction::Version, Network, Transaction, TxOut};
 use serde::{Deserialize, Serialize};
@@ -17,19 +17,15 @@ pub struct TransactionParams {
 }
 
 impl TransactionParams {
-    pub fn new(receivers: Vec<Receiver>, utxo_set: &UtxoSet) -> Self {
+    pub fn new(receivers: Vec<Receiver>, uxtos: &[Utxo]) -> Self {
         Self {
             receivers,
-            utxos: utxo_set.utxos().to_vec(),
+            utxos: uxtos.to_vec(),
         }
     }
 
-    pub fn to_utxo_set(&self) -> UtxoSet {
-        UtxoSet::new(self.utxos.clone())
-    }
-
     /// Construct an unsigned transaction from these params
-    pub fn to_unsigned_tx(&self, utxo_set: &UtxoSet, network: Network) -> Result<Transaction> {
+    pub fn to_unsigned_tx(&self, utxos: &[Utxo], network: Network) -> Result<Transaction> {
         let outputs: Vec<TxOut> = self
             .receivers
             .iter()
@@ -39,7 +35,7 @@ impl TransactionParams {
         let tx = Transaction {
             version: Version::TWO,
             lock_time: LockTime::ZERO,
-            input: utxo_set.utxos().iter().map(|u| u.into()).collect(),
+            input: utxos.iter().map(|u| u.into()).collect(),
             output: outputs,
         };
 
@@ -99,10 +95,10 @@ mod tests {
     fn test_transaction_params_to_unsigned_tx() {
         let addr = test_address();
         let receivers = vec![Receiver::new(&addr, Amount::from_sat(10_000))];
-        let utxo_set = UtxoSet::new(vec![test_utxo()]);
-        let params = TransactionParams::new(receivers, &utxo_set);
+        let utxos = vec![test_utxo()];
+        let params = TransactionParams::new(receivers, &utxos);
 
-        let tx = params.to_unsigned_tx(&utxo_set, Network::Testnet).unwrap();
+        let tx = params.to_unsigned_tx(&utxos, Network::Testnet).unwrap();
         assert_eq!(tx.input.len(), 1);
         assert_eq!(tx.output.len(), 1);
         assert_eq!(tx.output[0].value, Amount::from_sat(10_000));
@@ -110,20 +106,20 @@ mod tests {
 
     #[test]
     fn test_transaction_params_to_utxo_set() {
-        let utxo_set = UtxoSet::new(vec![test_utxo()]);
-        let params = TransactionParams::new(vec![], &utxo_set);
+        let utxos = vec![test_utxo()];
+        let params = TransactionParams::new(vec![], &utxos);
 
-        let restored = params.to_utxo_set();
-        assert_eq!(restored.utxos().len(), 1);
-        assert_eq!(restored.balance(), Amount::from_sat(50_000));
+        let restored = params.utxos;
+        assert_eq!(restored.len(), 1);
+        assert_eq!(UtxoSet::new(utxos).balance(), Amount::from_sat(50_000));
     }
 
     #[test]
     fn test_save_and_load_roundtrip() {
         let addr = test_address();
         let receivers = vec![Receiver::new(&addr, Amount::from_sat(3000))];
-        let utxo_set = UtxoSet::new(vec![test_utxo()]);
-        let params = TransactionParams::new(receivers, &utxo_set);
+        let utxos = vec![test_utxo()];
+        let params = TransactionParams::new(receivers, &utxos);
 
         let path = "/tmp/bcwallet_test_params.json";
         params.save_as_file(path).unwrap();

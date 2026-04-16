@@ -59,11 +59,11 @@ impl Receivers {
         self.0.iter().map(|r| r.amount()).sum()
     }
 
-    pub(crate) fn push(&mut self, receiver: Receiver) {
+    pub fn push(&mut self, receiver: Receiver) {
         self.0.push(receiver);
     }
 
-    pub(crate) fn into_inner(self) -> Vec<Receiver> {
+    pub fn into_inner(self) -> Vec<Receiver> {
         self.0
     }
 
