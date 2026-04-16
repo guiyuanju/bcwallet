@@ -6,7 +6,6 @@ use serde::{Deserialize, Serialize};
 use std::{
     fs::File,
     io::{BufReader, Write},
-    path::Path,
 };
 
 /// Unchecked transaction parameters parsed from JSON
@@ -73,28 +72,8 @@ impl TransactionParam {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::utxo::Utxo;
-    use crate::valued::ValuedSlice;
-    use bitcoin::{Address, Amount, Network, Txid};
-    use std::str::FromStr;
-    fn test_address() -> Address {
-        Address::from_str("mwqmgMkf6ZsX2wxSK6GA2JRMVswBo29UWX")
-            .unwrap()
-            .require_network(Network::Testnet)
-            .unwrap()
-    }
-
-    fn test_utxo() -> Utxo {
-        Utxo {
-            txid: Txid::from_str(
-                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            )
-            .unwrap(),
-            vout: 0,
-            amount: Amount::from_sat(50_000),
-            script_pubkey: test_address().script_pubkey(),
-        }
-    }
+    use crate::test_helpers::{test_address, test_utxo};
+    use bitcoin::{Address, Amount, Network};
 
     fn unchecked_receiver(addr: &Address, sat: u64) -> ReceiverUnchecked {
         ReceiverUnchecked::from(&crate::receiver::Receiver::new(
@@ -106,8 +85,10 @@ mod tests {
     #[test]
     fn test_transaction_params_to_unsigned_tx() {
         let addr = test_address();
-        let unchecked =
-            TransactionParamUnchecked::new(vec![unchecked_receiver(&addr, 10_000)], &[test_utxo()]);
+        let unchecked = TransactionParamUnchecked::new(
+            vec![unchecked_receiver(&addr, 10_000)],
+            &[test_utxo(50_000)],
+        );
         let params = unchecked.check(Network::Testnet).unwrap();
 
         assert_eq!(params.receivers.len(), 1);
@@ -117,19 +98,24 @@ mod tests {
 
     #[test]
     fn test_transaction_params_to_utxo_set() {
-        let utxos = vec![test_utxo()];
+        let utxos = vec![test_utxo(50_000)];
         let unchecked = TransactionParamUnchecked::new(vec![], &utxos);
         let params = unchecked.check(Network::Testnet).unwrap();
 
         assert_eq!(params.utxos.len(), 1);
-        assert_eq!(utxos.total_value(), Amount::from_sat(50_000));
+        assert_eq!(
+            utxos.iter().map(|u| u.amount).sum::<Amount>(),
+            Amount::from_sat(50_000)
+        );
     }
 
     #[test]
     fn test_save_and_load_roundtrip() {
         let addr = test_address();
-        let unchecked =
-            TransactionParamUnchecked::new(vec![unchecked_receiver(&addr, 3000)], &[test_utxo()]);
+        let unchecked = TransactionParamUnchecked::new(
+            vec![unchecked_receiver(&addr, 3000)],
+            &[test_utxo(50_000)],
+        );
 
         let path = "/tmp/bcwallet_test_params.json";
         unchecked.save_as_file(path).unwrap();

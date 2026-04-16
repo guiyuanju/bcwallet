@@ -1,9 +1,7 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use bitcoin::{Address, Amount, Network, TxOut};
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
-
-use crate::valued::Valued;
 
 /// Unchecked receiver parsed from JSON or CLI input
 #[derive(Serialize, Deserialize)]
@@ -46,12 +44,6 @@ impl Receiver {
     }
 }
 
-impl Valued for Receiver {
-    fn value(&self) -> Amount {
-        self.amount
-    }
-}
-
 impl From<&Receiver> for TxOut {
     fn from(r: &Receiver) -> Self {
         TxOut {
@@ -61,48 +53,18 @@ impl From<&Receiver> for TxOut {
     }
 }
 
-/// Parse raw `(address_str, satoshi)` pairs into validated receivers.
-pub fn parse_receivers(raw: &[(&str, u64)], network: Network) -> Result<Vec<Receiver>> {
-    if raw.is_empty() {
-        bail!("at least one receiver is required");
-    }
-    let mut items = Vec::with_capacity(raw.len());
-    for &(addr_str, sat) in raw {
-        let addr = Address::from_str(addr_str)
-            .with_context(|| format!("invalid address: {addr_str}"))?
-            .require_network(network)?;
-        items.push(Receiver::new(addr, Amount::from_sat(sat)));
-    }
-    Ok(items)
-}
-
-/// Extension methods for slices of [`Receiver`].
-pub trait ReceiverSliceExt {
-    /// Sum the serialized vbytes of all outputs (8 bytes value + 1 byte script len + script).
-    fn output_vbytes(&self) -> u64;
-}
-
-impl ReceiverSliceExt for [Receiver] {
-    fn output_vbytes(&self) -> u64 {
-        let mut total = 0u64;
-        for r in self {
-            let script_len = r.address.script_pubkey().len() as u64;
-            total += 8 + 1 + script_len;
-        }
-        total
-    }
+/// Sum the serialized vbytes of all outputs (8 bytes value + 1 byte script len + script).
+pub fn output_vbytes(receivers: &[Receiver]) -> u64 {
+    receivers
+        .iter()
+        .map(|r| 8 + 1 + r.address.script_pubkey().len() as u64)
+        .sum()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn test_address() -> Address {
-        Address::from_str("mwqmgMkf6ZsX2wxSK6GA2JRMVswBo29UWX")
-            .unwrap()
-            .require_network(Network::Testnet)
-            .unwrap()
-    }
+    use crate::test_helpers::{parse_receivers, test_address};
 
     #[test]
     fn test_receiver_to_tx_out() {

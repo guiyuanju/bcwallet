@@ -1,9 +1,8 @@
 use crate::{
     btcclient::BtcClient,
     params::TransactionParam,
-    receiver::{Receiver, ReceiverSliceExt},
+    receiver::{self, Receiver},
     utxo::{CoinSelector, P2PKH_OUTPUT_VBYTES},
-    valued::ValuedSlice,
     wallet::Wallet,
 };
 use anyhow::Result;
@@ -14,7 +13,7 @@ use bitcoin::{
     script::{self, PushBytes},
     sighash::SighashCache,
     transaction::Version,
-    EcdsaSighashType, Transaction, TxOut,
+    Amount, EcdsaSighashType, Transaction, TxOut,
 };
 use secp256k1::Secp256k1;
 
@@ -39,18 +38,18 @@ impl TransactionManager {
         mut receivers: Vec<Receiver>,
         selector: &dyn CoinSelector,
     ) -> Result<TransactionParam> {
-        let total_out = receivers.total_value();
+        let total_out: Amount = receivers.iter().map(|r| r.amount).sum();
 
         // Select inputs that cover amount and fee
         let utxos = client.get_utxos(&self.wallet.address)?;
-        let output_vbytes = receivers.output_vbytes() + P2PKH_OUTPUT_VBYTES;
+        let output_vbytes = receiver::output_vbytes(&receivers) + P2PKH_OUTPUT_VBYTES;
         let (selected, fee) =
             selector.select(&utxos, total_out, output_vbytes, client.get_fee_rate()?)?;
 
         // Calculate change, skip if it's dust
         let sender = &self.wallet.address;
         let dust_limit = TxOut::minimal_non_dust(sender.script_pubkey());
-        let raw_change = selected.total_value() - total_out - fee;
+        let raw_change: Amount = selected.iter().map(|u| u.amount).sum::<Amount>() - total_out - fee;
         if raw_change >= dust_limit.value {
             receivers.push(Receiver::new(sender.clone(), raw_change));
         }
@@ -111,25 +110,11 @@ impl TransactionManager {
 mod tests {
     use super::*;
     use crate::{
-        receiver::parse_receivers,
+        test_helpers::{parse_receivers, stub_wallet, test_utxo, RECEIVER},
         utxo::{SmallestFirst, Utxo},
     };
-    use bitcoin::{Address, Amount, Network, Txid};
+    use bitcoin::{Amount, Network, Txid};
     use std::{cell::RefCell, str::FromStr};
-
-    use crate::wallet::WalletFile;
-
-    const SENDER: &str = "mwqmgMkf6ZsX2wxSK6GA2JRMVswBo29UWX";
-    const RECEIVER: &str = "tb1qerzrlxcfu24davlur5sqmgzzgsal6wusda40er";
-
-    fn stub_wallet() -> Wallet {
-        WalletFile {
-            private_key: "cQ7YsHdL8Spm8qv7V6weuV7MskGcF6cfZk4AaNkE1aG8nVGGjTaM".to_string(),
-            address: SENDER.to_string(),
-        }
-        .into_wallet(Network::Testnet)
-        .unwrap()
-    }
 
     struct MockBtcClient {
         utxos: Vec<Utxo>,
@@ -159,17 +144,8 @@ mod tests {
     }
 
     fn mock_client() -> MockBtcClient {
-        let sender = Address::from_str(SENDER).unwrap().assume_checked();
         MockBtcClient {
-            utxos: vec![Utxo {
-                txid: Txid::from_str(
-                    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                )
-                .unwrap(),
-                vout: 0,
-                amount: Amount::from_sat(100_000),
-                script_pubkey: sender.script_pubkey(),
-            }],
+            utxos: vec![test_utxo(100_000)],
             fee_rate: Amount::from_sat(1),
             sent_txs: RefCell::new(vec![]),
         }

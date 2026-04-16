@@ -1,5 +1,4 @@
 use crate::utxo::Utxo;
-use crate::valued::ValuedSlice;
 use anyhow::{bail, Context, Result};
 use bitcoin::{Address, Amount, Txid};
 use bitcoincore_rpc::{
@@ -10,7 +9,7 @@ use bitcoincore_rpc::{
 pub trait BtcClient {
     fn get_utxos(&self, addr: &Address) -> Result<Vec<Utxo>>;
     fn get_balance(&self, addr: &Address) -> Result<Amount> {
-        Ok(self.get_utxos(addr)?.total_value())
+        Ok(self.get_utxos(addr)?.iter().map(|u| u.amount).sum())
     }
     fn get_fee_rate(&self) -> Result<Amount>;
     fn watch_addresses(&self, addrs: &[&Address]) -> Result<()>;

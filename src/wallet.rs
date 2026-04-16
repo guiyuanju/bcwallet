@@ -33,7 +33,6 @@ impl WalletFile {
         }
 
         Ok(Wallet {
-            wif: self.private_key,
             secret_key: privkey.inner,
             public_key,
             address: expected_addr,
@@ -44,7 +43,6 @@ impl WalletFile {
 
 /// In-memory wallet with pre-parsed key material.
 pub struct Wallet {
-    pub wif: String,
     pub secret_key: SecretKey,
     pub public_key: PublicKey,
     pub address: Address,
@@ -57,10 +55,8 @@ impl Wallet {
         let (secret_key, public_key) = secp.generate_keypair(&mut OsRng);
         let public_key = PublicKey::new(public_key);
         let address = Address::p2pkh(public_key, network);
-        let wif = PrivateKey::new(secret_key, network).to_wif();
 
         Self {
-            wif,
             secret_key,
             public_key,
             address,
@@ -78,7 +74,7 @@ impl Wallet {
 
     pub fn save(&self, file_path: &str) -> Result<()> {
         let wf = WalletFile {
-            private_key: self.wif.clone(),
+            private_key: PrivateKey::new(self.secret_key, self.network).to_wif(),
             address: self.address.to_string(),
         };
         let json =
@@ -100,8 +96,9 @@ mod tests {
         let wallet = Wallet::generate(Network::Testnet);
 
         let secp = Secp256k1::new();
+        let privkey = PrivateKey::new(wallet.secret_key, wallet.network);
         let addr = Address::p2pkh(
-            PublicKey::from_private_key(&secp, &PrivateKey::from_wif(&wallet.wif).unwrap()),
+            PublicKey::from_private_key(&secp, &privkey),
             Network::Testnet,
         );
 

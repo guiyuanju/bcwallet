@@ -1,11 +1,8 @@
 use anyhow::{bail, Result};
 use bitcoin::{Amount, OutPoint, ScriptBuf, Sequence, TxIn, Txid, Witness};
 use bitcoincore_rpc::json::ListUnspentResultEntry;
-use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
-
-use crate::valued::Valued;
 
 /// Estimated vbytes for a legacy P2PKH input (script_sig: push sig + push pubkey).
 pub const P2PKH_INPUT_VBYTES: u64 = 148;
@@ -15,7 +12,8 @@ pub const P2PKH_OUTPUT_VBYTES: u64 = 34;
 const TX_OVERHEAD_VBYTES: u64 = 10;
 
 /// Custom Utxo type to decouple from RPC client implementations.
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
+#[serde(try_from = "UtxoRaw", into = "UtxoRaw")]
 pub struct Utxo {
     pub txid: Txid,
     pub vout: u32,
@@ -23,40 +21,35 @@ pub struct Utxo {
     pub script_pubkey: ScriptBuf,
 }
 
-impl Serialize for Utxo {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut s = serializer.serialize_struct("Utxo", 4)?;
-        s.serialize_field("txid", &self.txid.to_string())?;
-        s.serialize_field("vout", &self.vout)?;
-        s.serialize_field("amount_sat", &self.amount.to_sat())?;
-        s.serialize_field("script_pubkey", &self.script_pubkey.to_hex_string())?;
-        s.end()
-    }
+#[derive(Serialize, Deserialize)]
+struct UtxoRaw {
+    txid: String,
+    vout: u32,
+    amount_sat: u64,
+    script_pubkey: String,
 }
 
-impl<'de> Deserialize<'de> for Utxo {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        #[derive(Deserialize)]
-        struct Raw {
-            txid: String,
-            vout: u32,
-            amount_sat: u64,
-            script_pubkey: String,
-        }
-        let raw = Raw::deserialize(deserializer)?;
+impl TryFrom<UtxoRaw> for Utxo {
+    type Error = anyhow::Error;
+
+    fn try_from(raw: UtxoRaw) -> Result<Self> {
         Ok(Self {
-            txid: Txid::from_str(&raw.txid).map_err(serde::de::Error::custom)?,
+            txid: Txid::from_str(&raw.txid)?,
             vout: raw.vout,
             amount: Amount::from_sat(raw.amount_sat),
-            script_pubkey: ScriptBuf::from_hex(&raw.script_pubkey)
-                .map_err(serde::de::Error::custom)?,
+            script_pubkey: ScriptBuf::from_hex(&raw.script_pubkey)?,
         })
     }
 }
 
-impl Valued for Utxo {
-    fn value(&self) -> Amount {
-        self.amount
+impl From<Utxo> for UtxoRaw {
+    fn from(u: Utxo) -> Self {
+        Self {
+            txid: u.txid.to_string(),
+            vout: u.vout,
+            amount_sat: u.amount.to_sat(),
+            script_pubkey: u.script_pubkey.to_hex_string(),
+        }
     }
 }
 
@@ -143,26 +136,12 @@ impl CoinSelector for SmallestFirst {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::valued::ValuedSlice;
-    use bitcoin::address::Address;
-
-    const TXID: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-
-    fn utxo(sat: u64) -> Utxo {
-        let addr = Address::from_str("mwqmgMkf6ZsX2wxSK6GA2JRMVswBo29UWX")
-            .unwrap()
-            .assume_checked();
-        Utxo {
-            txid: Txid::from_str(TXID).unwrap(),
-            vout: 0,
-            amount: Amount::from_sat(sat),
-            script_pubkey: addr.script_pubkey(),
-        }
-    }
+    use crate::test_helpers::test_utxo;
+    use bitcoin::Amount;
 
     #[test]
     fn test_select_single_utxo_covers_amount() {
-        let utxos = vec![utxo(100_000)];
+        let utxos = vec![test_utxo(100_000)];
         let (selected, fee) = SmallestFirst
             .select(
                 &utxos,
@@ -174,12 +153,12 @@ mod tests {
 
         assert_eq!(selected.len(), 1);
         assert!(fee > Amount::ZERO);
-        assert!(selected.total_value() >= Amount::from_sat(1_000) + fee);
+        assert!(selected.iter().map(|u| u.amount).sum::<Amount>() >= Amount::from_sat(1_000) + fee);
     }
 
     #[test]
     fn test_select_multiple_utxos_when_one_not_enough() {
-        let utxos = vec![utxo(5_000), utxo(5_000), utxo(5_000)];
+        let utxos = vec![test_utxo(5_000), test_utxo(5_000), test_utxo(5_000)];
         let (selected, fee) = SmallestFirst
             .select(
                 &utxos,
@@ -190,13 +169,13 @@ mod tests {
             .unwrap();
 
         assert!(selected.len() >= 2);
-        assert!(selected.total_value() >= Amount::from_sat(9_000) + fee);
+        assert!(selected.iter().map(|u| u.amount).sum::<Amount>() >= Amount::from_sat(9_000) + fee);
     }
 
     #[test]
     fn test_select_skips_dust_utxos() {
         // A UTXO worth less than the fee to spend it (148 sat at 1 sat/vB) should be skipped
-        let utxos = vec![utxo(100), utxo(100_000)];
+        let utxos = vec![test_utxo(100), test_utxo(100_000)];
         let (selected, _fee) = SmallestFirst
             .select(
                 &utxos,
@@ -212,7 +191,7 @@ mod tests {
 
     #[test]
     fn test_select_fails_on_insufficient_balance() {
-        let utxos = vec![utxo(500)];
+        let utxos = vec![test_utxo(500)];
         let result = SmallestFirst.select(
             &utxos,
             Amount::from_sat(100_000),
@@ -236,13 +215,13 @@ mod tests {
             Amount::from_sat(1),
         );
 
-        assert!(matches!(result, Err(_)));
+        assert!(result.is_err());
     }
 
     #[test]
     fn test_select_all_dust_fails() {
         // All UTXOs cost more to spend than they're worth
-        let utxos = vec![utxo(100), utxo(50), utxo(148)];
+        let utxos = vec![test_utxo(100), test_utxo(50), test_utxo(148)];
         let result = SmallestFirst.select(
             &utxos,
             Amount::from_sat(1_000),
@@ -250,6 +229,6 @@ mod tests {
             Amount::from_sat(1),
         );
 
-        assert!(matches!(result, Err(_)));
+        assert!(result.is_err());
     }
 }

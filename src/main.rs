@@ -1,15 +1,16 @@
 mod btcclient;
 mod params;
 mod receiver;
+#[cfg(test)]
+mod test_helpers;
 mod transaction;
 mod utxo;
-mod valued;
 mod wallet;
 
 use crate::{
     btcclient::{BtcClient, LocalRpc},
     params::TransactionParamUnchecked,
-    receiver::parse_receivers,
+    receiver::ReceiverUnchecked,
     transaction::TransactionManager,
     utxo::SmallestFirst,
     wallet::Wallet,
@@ -73,12 +74,10 @@ fn main() -> Result<()> {
             cfg.btc_client()?.watch_addresses(&[&wallet.address])?;
         }
         Commands::Prepare { receiver, output } => {
-            // Parse receivers
-            let raw: Vec<(&str, u64)> = receiver
+            let receivers = receiver
                 .iter()
-                .map(|r| parse_receiver(r))
-                .collect::<Result<_>>()?;
-            let receivers = parse_receivers(&raw, cfg.network)?;
+                .map(|s| parse_receiver(s)?.check(cfg.network))
+                .collect::<Result<Vec<_>>>()?;
 
             // Generate and save unsigned transaction
             let tm = TransactionManager::new(cfg.wallet()?);
@@ -136,11 +135,14 @@ impl Config {
     }
 }
 
-/// Parse "address:amount_sat" into (address, amount_sat).
-fn parse_receiver(s: &str) -> Result<(&str, u64)> {
+/// Parse "address:amount_sat" into a ReceiverUnchecked.
+fn parse_receiver(s: &str) -> Result<ReceiverUnchecked> {
     let (addr, amt) = s
         .rsplit_once(':')
         .context("receiver must be in 'address:amount_sat' format")?;
     let sat: u64 = amt.parse().context("invalid amount_sat")?;
-    Ok((addr, sat))
+    Ok(ReceiverUnchecked {
+        address: addr.to_string(),
+        amount_sat: sat,
+    })
 }
