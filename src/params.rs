@@ -1,4 +1,4 @@
-use crate::receiver::Receiver;
+use crate::receiver::{Receiver, ReceiverUnchecked};
 use crate::utxoset::Utxo;
 use anyhow::{Context, Result};
 use bitcoin::{absolute::LockTime, transaction::Version, Network, Transaction, TxOut};
@@ -8,47 +8,37 @@ use std::{
     io::{BufReader, Write},
 };
 
-/// Parameters needed to construct and sign a transaction offline.
-/// Written by `prepare` (online) and read by `sign` (offline).
+/// Unchecked transaction parameters parsed from JSON
 #[derive(Serialize, Deserialize)]
-pub struct TransactionParams {
-    pub receivers: Vec<Receiver>,
+pub struct TransactionParamUnchecked {
+    pub receivers: Vec<ReceiverUnchecked>,
     pub utxos: Vec<Utxo>,
 }
 
-impl TransactionParams {
-    pub fn new(receivers: Vec<Receiver>, uxtos: &[Utxo]) -> Self {
+impl TransactionParamUnchecked {
+    pub fn new(receivers: Vec<ReceiverUnchecked>, uxtos: &[Utxo]) -> Self {
         Self {
             receivers,
             utxos: uxtos.to_vec(),
         }
     }
 
-    /// Construct an unsigned transaction from these params
-    pub fn to_unsigned_tx(&self, network: Network) -> Result<Transaction> {
-        let outputs: Vec<TxOut> = self
+    pub fn check(self, network: Network) -> Result<TransactionParam> {
+        let receivers: Vec<Receiver> = self
             .receivers
-            .iter()
-            .map(|r| r.to_tx_out(network))
+            .into_iter()
+            .map(|r| r.check(network))
             .collect::<Result<_>>()?;
-
-        let tx = Transaction {
-            version: Version::TWO,
-            lock_time: LockTime::ZERO,
-            input: self.utxos.iter().map(|u| u.into()).collect(),
-            output: outputs,
-        };
-
-        Ok(tx)
+        Ok(TransactionParam {
+            receivers,
+            utxos: self.utxos,
+        })
     }
 
-    pub fn from_file(path: &str, network: Network) -> Result<Self> {
+    pub fn from_file(path: &str) -> Result<Self> {
         let file = File::open(path).context("failed to open params file")?;
         let reader = BufReader::new(file);
-        let params: Self =
-            serde_json::from_reader(reader).context("failed to deserialize params file")?;
-        params.validate(network)?;
-        Ok(params)
+        serde_json::from_reader(reader).context("failed to deserialize params file")
     }
 
     pub fn save_as_file(&self, path: &str) -> Result<()> {
@@ -57,12 +47,25 @@ impl TransactionParams {
         let mut file = File::create(path).context("failed to create params file")?;
         writeln!(file, "{}", json).context("failed to write params file")
     }
+}
 
-    fn validate(&self, network: Network) -> Result<()> {
-        for r in &self.receivers {
-            r.address(network)?;
+/// Validated transaction parameters with checked addresses and amounts.
+pub struct TransactionParam {
+    pub receivers: Vec<Receiver>,
+    pub utxos: Vec<Utxo>,
+}
+
+impl TransactionParam {
+    /// Construct an unsigned transaction from these params
+    pub fn to_unsigned_tx(&self) -> Transaction {
+        let outputs: Vec<TxOut> = self.receivers.iter().map(|r| r.to_tx_out()).collect();
+
+        Transaction {
+            version: Version::TWO,
+            lock_time: LockTime::ZERO,
+            input: self.utxos.iter().map(|u| u.into()).collect(),
+            output: outputs,
         }
-        Ok(())
     }
 }
 
@@ -94,11 +97,13 @@ mod tests {
     #[test]
     fn test_transaction_params_to_unsigned_tx() {
         let addr = test_address();
-        let receivers = vec![Receiver::new(&addr, Amount::from_sat(10_000))];
-        let utxos = vec![test_utxo()];
-        let params = TransactionParams::new(receivers, &utxos);
+        let unchecked = TransactionParamUnchecked::new(
+            vec![ReceiverUnchecked::new(&addr, Amount::from_sat(10_000))],
+            &[test_utxo()],
+        );
+        let params = unchecked.check(Network::Testnet).unwrap();
 
-        let tx = params.to_unsigned_tx(Network::Testnet).unwrap();
+        let tx = params.to_unsigned_tx();
         assert_eq!(tx.input.len(), 1);
         assert_eq!(tx.output.len(), 1);
         assert_eq!(tx.output[0].value, Amount::from_sat(10_000));
@@ -107,28 +112,34 @@ mod tests {
     #[test]
     fn test_transaction_params_to_utxo_set() {
         let utxos = vec![test_utxo()];
-        let params = TransactionParams::new(vec![], &utxos);
+        let unchecked = TransactionParamUnchecked::new(vec![], &utxos);
+        let params = unchecked.check(Network::Testnet).unwrap();
 
-        let restored = params.utxos;
-        assert_eq!(restored.len(), 1);
+        assert_eq!(params.utxos.len(), 1);
         assert_eq!(UtxoSet::new(utxos).balance(), Amount::from_sat(50_000));
     }
 
     #[test]
     fn test_save_and_load_roundtrip() {
         let addr = test_address();
-        let receivers = vec![Receiver::new(&addr, Amount::from_sat(3000))];
-        let utxos = vec![test_utxo()];
-        let params = TransactionParams::new(receivers, &utxos);
+        let unchecked = TransactionParamUnchecked::new(
+            vec![ReceiverUnchecked::new(&addr, Amount::from_sat(3000))],
+            &[test_utxo()],
+        );
 
         let path = "/tmp/bcwallet_test_params.json";
-        params.save_as_file(path).unwrap();
+        unchecked.save_as_file(path).unwrap();
 
-        let loaded = TransactionParams::from_file(path, Network::Testnet).unwrap();
+        let loaded = TransactionParamUnchecked::from_file(path).unwrap();
         assert_eq!(loaded.receivers.len(), 1);
         assert_eq!(loaded.receivers[0].amount_sat, 3000);
         assert_eq!(loaded.utxos.len(), 1);
         assert_eq!(loaded.utxos[0].amount.to_sat(), 50_000);
+
+        // Verify check works on loaded params
+        let checked = loaded.check(Network::Testnet).unwrap();
+        assert_eq!(checked.receivers.len(), 1);
+        assert_eq!(checked.receivers[0].amount, Amount::from_sat(3000));
 
         std::fs::remove_file(path).ok();
     }

@@ -7,7 +7,7 @@ mod wallet;
 
 use crate::{
     btcclient::{BtcClient, LocalRpc},
-    params::TransactionParams,
+    params::TransactionParamUnchecked,
     receiver::Receivers,
     transaction::TransactionManager,
     wallet::Wallet,
@@ -86,7 +86,7 @@ fn main() -> Result<()> {
             println!("Params written to {}", output);
         }
         Commands::Sign { params } => {
-            let tx_params = TransactionParams::from_file(&params, cfg.network)?;
+            let tx_params = TransactionParamUnchecked::from_file(&params)?.check(cfg.network)?;
             let tm = TransactionManager::new(cfg.wallet()?);
             println!("{}", tm.sign(&tx_params)?);
         }

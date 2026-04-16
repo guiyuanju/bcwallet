@@ -3,14 +3,14 @@ use bitcoin::{Address, Amount, Network, TxOut};
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
-/// A single output in the transaction.
+/// Unchecked receiver parsed from JSON or CLI input
 #[derive(Serialize, Deserialize)]
-pub struct Receiver {
+pub struct ReceiverUnchecked {
     pub address: String,
     pub amount_sat: u64,
 }
 
-impl Receiver {
+impl ReceiverUnchecked {
     pub fn new(address: &Address, amount: Amount) -> Self {
         Self {
             address: address.to_string(),
@@ -18,25 +18,45 @@ impl Receiver {
         }
     }
 
-    pub fn address(&self, network: Network) -> Result<Address> {
-        Address::from_str(&self.address)?
+    /// Check the network, prevent fund sent to the wrong network
+    pub fn check(self, network: Network) -> Result<Receiver> {
+        let address = Address::from_str(&self.address)?
             .require_network(network)
-            .context("invalid receiver address")
-    }
-
-    pub fn amount(&self) -> Amount {
-        Amount::from_sat(self.amount_sat)
-    }
-
-    pub fn to_tx_out(&self, network: Network) -> Result<TxOut> {
-        Ok(TxOut {
-            value: self.amount(),
-            script_pubkey: self.address(network)?.script_pubkey(),
+            .context("invalid receiver address")?;
+        Ok(Receiver {
+            address,
+            amount: Amount::from_sat(self.amount_sat),
         })
     }
 }
 
-/// A collection of receivers for a transaction.
+/// A validated receiver with a checked address and amount
+pub struct Receiver {
+    pub address: Address,
+    pub amount: Amount,
+}
+
+impl Receiver {
+    pub fn new(address: Address, amount: Amount) -> Self {
+        Self { address, amount }
+    }
+
+    pub fn to_unchecked(&self) -> ReceiverUnchecked {
+        ReceiverUnchecked {
+            address: self.address.to_string(),
+            amount_sat: self.amount.to_sat(),
+        }
+    }
+
+    pub fn to_tx_out(&self) -> TxOut {
+        TxOut {
+            value: self.amount,
+            script_pubkey: self.address.script_pubkey(),
+        }
+    }
+}
+
+/// A collection of validated receivers for a transaction.
 pub struct Receivers(Vec<Receiver>);
 
 impl Receivers {
@@ -50,31 +70,31 @@ impl Receivers {
             let addr = Address::from_str(addr_str)
                 .with_context(|| format!("invalid address: {addr_str}"))?
                 .require_network(network)?;
-            items.push(Receiver::new(&addr, Amount::from_sat(sat)));
+            items.push(Receiver::new(addr, Amount::from_sat(sat)));
         }
         Ok(Self(items))
     }
 
     pub fn total_out(&self) -> Amount {
-        self.0.iter().map(|r| r.amount()).sum()
+        self.0.iter().map(|r| r.amount).sum()
     }
 
     pub fn push(&mut self, receiver: Receiver) {
         self.0.push(receiver);
     }
 
-    pub fn into_inner(self) -> Vec<Receiver> {
-        self.0
+    pub fn into_unchecked(self) -> Vec<ReceiverUnchecked> {
+        self.0.iter().map(|r| r.to_unchecked()).collect()
     }
 
     /// Sum the serialized vbytes of all outputs (8 bytes value + 1 byte script len + script).
-    pub fn output_vbytes(&self, network: Network) -> Result<u64> {
+    pub fn output_vbytes(&self) -> u64 {
         let mut total = 0u64;
         for r in &self.0 {
-            let script_len = r.address(network)?.script_pubkey().len() as u64;
+            let script_len = r.address.script_pubkey().len() as u64;
             total += 8 + 1 + script_len;
         }
-        Ok(total)
+        total
     }
 }
 
@@ -92,20 +112,19 @@ mod tests {
     #[test]
     fn test_receiver_to_tx_out() {
         let addr = test_address();
-        let r = Receiver::new(&addr, Amount::from_sat(5000));
-        let out = r.to_tx_out(Network::Testnet).unwrap();
+        let r = Receiver::new(addr.clone(), Amount::from_sat(5000));
+        let out = r.to_tx_out();
         assert_eq!(out.value, Amount::from_sat(5000));
         assert_eq!(out.script_pubkey, addr.script_pubkey());
     }
 
     #[test]
-    fn test_receiver_invalid_address() {
-        let r = Receiver {
+    fn test_receiver_unchecked_invalid_address() {
+        let r = ReceiverUnchecked {
             address: "not_a_valid_address".to_string(),
             amount_sat: 100,
         };
-        assert!(r.address(Network::Testnet).is_err());
-        assert!(r.to_tx_out(Network::Testnet).is_err());
+        assert!(r.check(Network::Testnet).is_err());
     }
 
     #[test]

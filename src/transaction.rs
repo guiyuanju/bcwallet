@@ -1,6 +1,6 @@
 use crate::{
     btcclient::BtcClient,
-    params::TransactionParams,
+    params::{TransactionParam, TransactionParamUnchecked},
     receiver::{Receiver, Receivers},
     utxoset::P2PKH_OUTPUT_VBYTES,
     wallet::Wallet,
@@ -34,12 +34,12 @@ impl TransactionManager {
         &self,
         client: &T,
         mut receivers: Receivers,
-    ) -> Result<TransactionParams> {
+    ) -> Result<TransactionParamUnchecked> {
         let total_out = receivers.total_out();
 
         // Select inputs from UTXO set that cover amount and fee
         let utxo_set = client.get_utxo_set(&self.wallet.address)?;
-        let output_vbytes = receivers.output_vbytes(self.wallet.network)? + P2PKH_OUTPUT_VBYTES;
+        let output_vbytes = receivers.output_vbytes() + P2PKH_OUTPUT_VBYTES;
         let (inputs, fee) =
             utxo_set.select_input(total_out, output_vbytes, client.get_fee_rate()?)?;
 
@@ -48,19 +48,19 @@ impl TransactionManager {
         let dust_limit = TxOut::minimal_non_dust(sender.script_pubkey());
         let raw_change = inputs.balance() - total_out - fee;
         if raw_change >= dust_limit.value {
-            receivers.push(Receiver::new(sender, raw_change));
+            receivers.push(Receiver::new(sender.clone(), raw_change));
         }
 
-        Ok(TransactionParams::new(
-            receivers.into_inner(),
+        Ok(TransactionParamUnchecked::new(
+            receivers.into_unchecked(),
             inputs.utxos(),
         ))
     }
 
     /// Sign a transaction from params (offline, no network access)
     /// Returns the broadcast-ready hex string
-    pub fn sign(&self, params: &TransactionParams) -> Result<String> {
-        let mut tx = params.to_unsigned_tx(self.wallet.network)?;
+    pub fn sign(&self, params: &TransactionParam) -> Result<String> {
+        let mut tx = params.to_unsigned_tx();
 
         let secret_key = &self.wallet.secret_key;
         let pubkey = &self.wallet.public_key;
@@ -180,8 +180,9 @@ mod tests {
         let tm = TransactionManager::new(stub_wallet());
         let receivers = Receivers::parse(&[(RECEIVER, 1000)], Network::Testnet).unwrap();
         let params = tm.prepare(&mock_client(), receivers).unwrap();
+        let checked = params.check(Network::Testnet).unwrap();
 
-        let hex = tm.sign(&params).unwrap();
+        let hex = tm.sign(&checked).unwrap();
         assert!(!hex.is_empty());
         // Valid hex string (even length, all hex chars)
         assert!(hex.len() % 2 == 0);
@@ -193,9 +194,10 @@ mod tests {
         let tm = TransactionManager::new(stub_wallet());
         let receivers = Receivers::parse(&[(RECEIVER, 1000)], Network::Testnet).unwrap();
         let params = tm.prepare(&mock_client(), receivers).unwrap();
+        let checked = params.check(Network::Testnet).unwrap();
 
-        let hex1 = tm.sign(&params).unwrap();
-        let hex2 = tm.sign(&params).unwrap();
+        let hex1 = tm.sign(&checked).unwrap();
+        let hex2 = tm.sign(&checked).unwrap();
         assert_eq!(hex1, hex2);
     }
 
@@ -218,8 +220,9 @@ mod tests {
         let client = mock_client();
         let receivers = Receivers::parse(&[(RECEIVER, 1000)], Network::Testnet).unwrap();
         let params = tm.prepare(&client, receivers).unwrap();
+        let checked = params.check(Network::Testnet).unwrap();
 
-        let tx_hex = tm.sign(&params).unwrap();
+        let tx_hex = tm.sign(&checked).unwrap();
         let txid = client.send_raw_transaction(&tx_hex).unwrap();
 
         assert_eq!(
