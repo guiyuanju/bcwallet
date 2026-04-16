@@ -74,3 +74,34 @@ Options:
 - [ ] Multi-round UTXO output selection algorithm
 - [ ] Support SegWit address
 - [ ] Use PSBT to support Multi-Sig
+
+## What I learned
+
+### Cryptocurrency
+
+- UTXO
+- Transaction: input, output, scriptSig, scriptPubKey
+- Fee, dust
+- Script language
+- Signature: ECDSA
+- Transaction format: P2PKH, P2SH, P2WPKH, P2WSH
+- Encoding: DER, Base58, WIF
+- Time locking
+- Bitcoin Core RPC
+- PSBT
+- HD Wallet
+
+### Rust
+
+Libraries:
+
+- bitcoin
+- bitcoincore-rpc
+- secp256k1
+
+Techniques:
+
+- Parse, don't validate: ReceiverChecked -> Receiver
+- Use trait to extrait common behavior, and elimnate thin wrapper type: Receivers -> valued trait
+- AI agent coding workflow for a new domain: Learn concept first -> write code manually -> build connection between code and concept -> then use AI to generate code -> read the generated code, reasom about them at the level of concept rather than code
+  - Why writing code manually is necessary: By writing code, you learn the connection between a domain knowledge and the code shape, then you can read and extract knowledge from the code AI generated quickly
