@@ -1,6 +1,5 @@
 mod btcclient;
 mod params;
-mod receiver;
 #[cfg(test)]
 mod test_helpers;
 mod transaction;
@@ -9,13 +8,12 @@ mod wallet;
 
 use crate::{
     btcclient::{BtcClient, LocalRpc},
-    params::TransactionParamUnchecked,
-    receiver::ReceiverUnchecked,
+    params::{ReceiverUnchecked, TransactionParamUnchecked},
     transaction::TransactionManager,
     utxo::SmallestFirst,
     wallet::Wallet,
 };
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
 use bitcoin::Network;
 use clap::{Parser, Subcommand};
 use std::env;
@@ -37,8 +35,8 @@ enum Commands {
     /// Prepare transaction params file (online, requires RPC)
     Prepare {
         /// Receivers in "address:amount_sat" format (repeatable)
-        #[arg(long, required = true)]
-        receiver: Vec<String>,
+        #[arg(long, required = true, value_parser = clap::value_parser!(ReceiverUnchecked))]
+        receiver: Vec<ReceiverUnchecked>,
         /// Output params file path
         #[arg(long, default_value = "params.json")]
         output: String,
@@ -75,8 +73,8 @@ fn main() -> Result<()> {
         }
         Commands::Prepare { receiver, output } => {
             let receivers = receiver
-                .iter()
-                .map(|s| parse_receiver(s)?.check(cfg.network))
+                .into_iter()
+                .map(|r| r.check(cfg.network))
                 .collect::<Result<Vec<_>>>()?;
 
             // Generate and save unsigned transaction
@@ -133,16 +131,4 @@ impl Config {
     fn wallet(&self) -> Result<Wallet> {
         Wallet::from_file(&self.wallet_path, self.network)
     }
-}
-
-/// Parse "address:amount_sat" into a ReceiverUnchecked.
-fn parse_receiver(s: &str) -> Result<ReceiverUnchecked> {
-    let (addr, amt) = s
-        .rsplit_once(':')
-        .context("receiver must be in 'address:amount_sat' format")?;
-    let sat: u64 = amt.parse().context("invalid amount_sat")?;
-    Ok(ReceiverUnchecked {
-        address: addr.to_string(),
-        amount_sat: sat,
-    })
 }

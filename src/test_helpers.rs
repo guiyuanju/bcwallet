@@ -1,4 +1,4 @@
-use crate::receiver::{Receiver, ReceiverUnchecked};
+use crate::params::{Receiver, ReceiverUnchecked};
 use crate::utxo::Utxo;
 use crate::wallet::{Wallet, WalletFile};
 use anyhow::{bail, Result};

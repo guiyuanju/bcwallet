@@ -1,7 +1,6 @@
 use crate::{
     btcclient::BtcClient,
-    params::TransactionParam,
-    receiver::{self, Receiver},
+    params::{self, Receiver, TransactionParam},
     utxo::{CoinSelector, P2PKH_OUTPUT_VBYTES},
     wallet::Wallet,
 };
@@ -42,7 +41,7 @@ impl TransactionManager {
 
         // Select inputs that cover amount and fee
         let utxos = client.get_utxos(&self.wallet.address)?;
-        let output_vbytes = receiver::output_vbytes(&receivers) + P2PKH_OUTPUT_VBYTES;
+        let output_vbytes = params::output_vbytes(&receivers) + P2PKH_OUTPUT_VBYTES;
         let (selected, fee) =
             selector.select(&utxos, total_out, output_vbytes, client.get_fee_rate()?)?;
 
