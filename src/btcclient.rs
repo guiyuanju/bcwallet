@@ -102,11 +102,3 @@ impl BtcClient for LocalRpc {
             .context("failed to send raw transaction")
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_get_utxos() {}
-}

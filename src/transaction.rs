@@ -110,11 +110,11 @@ mod tests {
     const RECEIVER: &str = "tb1qerzrlxcfu24davlur5sqmgzzgsal6wusda40er";
 
     fn stub_wallet() -> Wallet {
-        Wallet::try_from(WalletFile {
+        WalletFile {
             private_key: "cQ7YsHdL8Spm8qv7V6weuV7MskGcF6cfZk4AaNkE1aG8nVGGjTaM".to_string(),
             address: SENDER.to_string(),
-            network: Network::Testnet,
-        })
+        }
+        .into_wallet(Network::Testnet)
         .unwrap()
     }
 
