@@ -1,8 +1,9 @@
 use crate::{
     btcclient::BtcClient,
     params::{TransactionParam, TransactionParamUnchecked},
-    receiver::{Receiver, ReceiverUnchecked, Receivers},
-    utxoset::P2PKH_OUTPUT_VBYTES,
+    receiver::{Receiver, ReceiverSliceExt, ReceiverUnchecked},
+    utxoset::{CoinSelector, P2PKH_OUTPUT_VBYTES},
+    valued::ValuedSlice,
     wallet::Wallet,
 };
 use anyhow::Result;
@@ -35,28 +36,30 @@ impl TransactionManager {
     pub fn prepare<T: BtcClient>(
         &self,
         client: &T,
-        mut receivers: Receivers,
+        mut receivers: Vec<Receiver>,
+        selector: &dyn CoinSelector,
     ) -> Result<TransactionParamUnchecked> {
-        let total_out = receivers.total_out();
+        let total_out = receivers.total_value();
 
-        // Select inputs from UTXO set that cover amount and fee
-        let utxo_set = client.get_utxo_set(&self.wallet.address)?;
+        // Select inputs that cover amount and fee
+        let utxos = client.get_utxos(&self.wallet.address)?;
         let output_vbytes = receivers.output_vbytes() + P2PKH_OUTPUT_VBYTES;
-        let (inputs, fee) =
-            utxo_set.select_input(total_out, output_vbytes, client.get_fee_rate()?)?;
+        let (selected, fee) =
+            selector.select(&utxos, total_out, output_vbytes, client.get_fee_rate()?)?;
 
-        // Calculate change, skip if it's a dust
+        // Calculate change, skip if it's dust
         let sender = &self.wallet.address;
         let dust_limit = TxOut::minimal_non_dust(sender.script_pubkey());
-        let raw_change = inputs.balance() - total_out - fee;
+        let raw_change = selected.total_value() - total_out - fee;
         if raw_change >= dust_limit.value {
             receivers.push(Receiver::new(sender.clone(), raw_change));
         }
 
-        let unchecked_receivers: Vec<ReceiverUnchecked> = receivers.into();
+        let unchecked_receivers: Vec<ReceiverUnchecked> =
+            receivers.iter().map(ReceiverUnchecked::from).collect();
         Ok(TransactionParamUnchecked::new(
             unchecked_receivers,
-            inputs.utxos(),
+            &selected,
         ))
     }
 
@@ -113,8 +116,8 @@ impl TransactionManager {
 mod tests {
     use super::*;
     use crate::{
-        receiver::Receivers,
-        utxoset::{Utxo, UtxoSet},
+        receiver::parse_receivers,
+        utxoset::{SmallestFirst, Utxo},
     };
     use bitcoin::{Address, Amount, Network, Txid};
     use std::{cell::RefCell, str::FromStr};
@@ -140,8 +143,8 @@ mod tests {
     }
 
     impl BtcClient for MockBtcClient {
-        fn get_utxo_set(&self, _addr: &bitcoin::Address) -> anyhow::Result<UtxoSet> {
-            Ok(UtxoSet::new(self.utxos.clone()))
+        fn get_utxos(&self, _addr: &bitcoin::Address) -> anyhow::Result<Vec<Utxo>> {
+            Ok(self.utxos.clone())
         }
         fn get_fee_rate(&self) -> anyhow::Result<Amount> {
             Ok(self.fee_rate)
@@ -180,8 +183,8 @@ mod tests {
     #[test]
     fn test_prepare_single_receiver() {
         let tm = TransactionManager::new(stub_wallet());
-        let receivers = Receivers::parse(&[(RECEIVER, 1000)], Network::Testnet).unwrap();
-        let params = tm.prepare(&mock_client(), receivers).unwrap();
+        let receivers = parse_receivers(&[(RECEIVER, 1000)], Network::Testnet).unwrap();
+        let params = tm.prepare(&mock_client(), receivers, &SmallestFirst).unwrap();
 
         assert!(!params.utxos.is_empty());
         assert!(params.receivers.len() >= 1);
@@ -191,8 +194,8 @@ mod tests {
     #[test]
     fn test_sign_produces_hex() {
         let tm = TransactionManager::new(stub_wallet());
-        let receivers = Receivers::parse(&[(RECEIVER, 1000)], Network::Testnet).unwrap();
-        let params = tm.prepare(&mock_client(), receivers).unwrap();
+        let receivers = parse_receivers(&[(RECEIVER, 1000)], Network::Testnet).unwrap();
+        let params = tm.prepare(&mock_client(), receivers, &SmallestFirst).unwrap();
         let checked = params.check(Network::Testnet).unwrap();
 
         let hex = tm.sign(&checked).unwrap();
@@ -205,8 +208,8 @@ mod tests {
     #[test]
     fn test_sign_is_deterministic() {
         let tm = TransactionManager::new(stub_wallet());
-        let receivers = Receivers::parse(&[(RECEIVER, 1000)], Network::Testnet).unwrap();
-        let params = tm.prepare(&mock_client(), receivers).unwrap();
+        let receivers = parse_receivers(&[(RECEIVER, 1000)], Network::Testnet).unwrap();
+        let params = tm.prepare(&mock_client(), receivers, &SmallestFirst).unwrap();
         let checked = params.check(Network::Testnet).unwrap();
 
         let hex1 = tm.sign(&checked).unwrap();
@@ -218,8 +221,8 @@ mod tests {
     fn test_prepare_multiple_receivers() {
         let tm = TransactionManager::new(stub_wallet());
         let receivers =
-            Receivers::parse(&[(RECEIVER, 500), (RECEIVER, 500)], Network::Testnet).unwrap();
-        let params = tm.prepare(&mock_client(), receivers).unwrap();
+            parse_receivers(&[(RECEIVER, 500), (RECEIVER, 500)], Network::Testnet).unwrap();
+        let params = tm.prepare(&mock_client(), receivers, &SmallestFirst).unwrap();
 
         // At least the 2 explicit receivers
         assert!(params.receivers.len() >= 2);
@@ -231,8 +234,8 @@ mod tests {
     fn test_send_broadcasts_signed_tx() {
         let tm = TransactionManager::new(stub_wallet());
         let client = mock_client();
-        let receivers = Receivers::parse(&[(RECEIVER, 1000)], Network::Testnet).unwrap();
-        let params = tm.prepare(&client, receivers).unwrap();
+        let receivers = parse_receivers(&[(RECEIVER, 1000)], Network::Testnet).unwrap();
+        let params = tm.prepare(&client, receivers, &SmallestFirst).unwrap();
         let checked = params.check(Network::Testnet).unwrap();
 
         let tx_hex = tm.sign(&checked).unwrap();

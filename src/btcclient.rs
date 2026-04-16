@@ -1,4 +1,5 @@
-use crate::utxoset::{Utxo, UtxoSet};
+use crate::utxoset::Utxo;
+use crate::valued::ValuedSlice;
 use anyhow::{bail, Context, Result};
 use bitcoin::{Address, Amount, Txid};
 use bitcoincore_rpc::{
@@ -7,9 +8,9 @@ use bitcoincore_rpc::{
 };
 
 pub trait BtcClient {
-    fn get_utxo_set(&self, addr: &Address) -> Result<UtxoSet>;
+    fn get_utxos(&self, addr: &Address) -> Result<Vec<Utxo>>;
     fn get_balance(&self, addr: &Address) -> Result<Amount> {
-        Ok(self.get_utxo_set(addr)?.balance())
+        Ok(self.get_utxos(addr)?.total_value())
     }
     fn get_fee_rate(&self) -> Result<Amount>;
     fn watch_addresses(&self, addrs: &[&Address]) -> Result<()>;
@@ -62,16 +63,14 @@ impl LocalRpc {
 }
 
 impl BtcClient for LocalRpc {
-    fn get_utxo_set(&self, addr: &Address) -> Result<UtxoSet> {
-        let utxos = self
+    fn get_utxos(&self, addr: &Address) -> Result<Vec<Utxo>> {
+        Ok(self
             .client
             .list_unspent(Some(1), None, Some(&[addr]), Some(false), None)
             .context("failed to list unspent")?
             .iter()
             .map(|e| e.into())
-            .collect::<Vec<Utxo>>();
-
-        Ok(UtxoSet::new(utxos))
+            .collect())
     }
 
     /// Import address descriptors so Bitcoin Core watches them.

@@ -3,6 +3,8 @@ use bitcoin::{Address, Amount, Network, TxOut};
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
+use crate::valued::Valued;
+
 /// Unchecked receiver parsed from JSON or CLI input
 #[derive(Serialize, Deserialize)]
 pub struct ReceiverUnchecked {
@@ -44,6 +46,12 @@ impl Receiver {
     }
 }
 
+impl Valued for Receiver {
+    fn value(&self) -> Amount {
+        self.amount
+    }
+}
+
 impl From<&Receiver> for TxOut {
     fn from(r: &Receiver) -> Self {
         TxOut {
@@ -53,70 +61,35 @@ impl From<&Receiver> for TxOut {
     }
 }
 
-/// Unchecked collection of receivers, deserialized directly from JSON.
-/// Call `.check(network)` to validate all addresses at once.
-#[derive(Serialize, Deserialize)]
-pub struct ReceiversUnchecked(pub Vec<ReceiverUnchecked>);
-
-impl ReceiversUnchecked {
-    pub fn check(self, network: Network) -> Result<Receivers> {
-        if self.0.is_empty() {
-            bail!("at least one receiver is required");
-        }
-        let items: Vec<Receiver> = self
-            .0
-            .into_iter()
-            .map(|r| r.check(network))
-            .collect::<Result<_>>()?;
-        Ok(Receivers(items))
+/// Parse raw `(address_str, satoshi)` pairs into validated receivers.
+pub fn parse_receivers(raw: &[(&str, u64)], network: Network) -> Result<Vec<Receiver>> {
+    if raw.is_empty() {
+        bail!("at least one receiver is required");
     }
+    let mut items = Vec::with_capacity(raw.len());
+    for &(addr_str, sat) in raw {
+        let addr = Address::from_str(addr_str)
+            .with_context(|| format!("invalid address: {addr_str}"))?
+            .require_network(network)?;
+        items.push(Receiver::new(addr, Amount::from_sat(sat)));
+    }
+    Ok(items)
 }
 
-/// A collection of validated receivers for a transaction.
-pub struct Receivers(Vec<Receiver>);
-
-impl Receivers {
-    /// Parse raw `(address_str, satoshi)` pairs into validated receivers.
-    pub fn parse(raw: &[(&str, u64)], network: Network) -> Result<Self> {
-        if raw.is_empty() {
-            bail!("at least one receiver is required");
-        }
-        let mut items = Vec::with_capacity(raw.len());
-        for &(addr_str, sat) in raw {
-            let addr = Address::from_str(addr_str)
-                .with_context(|| format!("invalid address: {addr_str}"))?
-                .require_network(network)?;
-            items.push(Receiver::new(addr, Amount::from_sat(sat)));
-        }
-        Ok(Self(items))
-    }
-
-    pub fn total_out(&self) -> Amount {
-        self.0.iter().map(|r| r.amount).sum()
-    }
-
-    pub fn push(&mut self, receiver: Receiver) {
-        self.0.push(receiver);
-    }
-
-    pub fn receivers(&self) -> &[Receiver] {
-        &self.0
-    }
-
+/// Extension methods for slices of [`Receiver`].
+pub trait ReceiverSliceExt {
     /// Sum the serialized vbytes of all outputs (8 bytes value + 1 byte script len + script).
-    pub fn output_vbytes(&self) -> u64 {
+    fn output_vbytes(&self) -> u64;
+}
+
+impl ReceiverSliceExt for [Receiver] {
+    fn output_vbytes(&self) -> u64 {
         let mut total = 0u64;
-        for r in &self.0 {
+        for r in self {
             let script_len = r.address.script_pubkey().len() as u64;
             total += 8 + 1 + script_len;
         }
         total
-    }
-}
-
-impl From<Receivers> for Vec<ReceiverUnchecked> {
-    fn from(rs: Receivers) -> Self {
-        rs.0.iter().map(ReceiverUnchecked::from).collect()
     }
 }
 
@@ -151,7 +124,7 @@ mod tests {
 
     #[test]
     fn test_parse_empty_receivers_fails() {
-        let result = Receivers::parse(&[], Network::Testnet);
+        let result = parse_receivers(&[], Network::Testnet);
         assert!(result.is_err());
     }
 }

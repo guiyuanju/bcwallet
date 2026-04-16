@@ -3,13 +3,15 @@ mod params;
 mod receiver;
 mod transaction;
 mod utxoset;
+mod valued;
 mod wallet;
 
 use crate::{
     btcclient::{BtcClient, LocalRpc},
     params::TransactionParamUnchecked,
-    receiver::Receivers,
+    receiver::parse_receivers,
     transaction::TransactionManager,
+    utxoset::SmallestFirst,
     wallet::Wallet,
 };
 use anyhow::{bail, Context, Result};
@@ -76,11 +78,11 @@ fn main() -> Result<()> {
                 .iter()
                 .map(|r| parse_receiver(r))
                 .collect::<Result<_>>()?;
-            let receivers = Receivers::parse(&raw, cfg.network)?;
+            let receivers = parse_receivers(&raw, cfg.network)?;
 
             // Generate and save unsigned transaction
             let tm = TransactionManager::new(cfg.wallet()?);
-            let params = tm.prepare(&cfg.btc_client()?, receivers)?;
+            let params = tm.prepare(&cfg.btc_client()?, receivers, &SmallestFirst)?;
             params.save_as_file(&output)?;
 
             println!("Params written to {}", output);

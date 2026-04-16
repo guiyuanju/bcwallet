@@ -4,6 +4,8 @@ use bitcoincore_rpc::json::ListUnspentResultEntry;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
+use crate::valued::Valued;
+
 /// Estimated vbytes for a legacy P2PKH input (script_sig: push sig + push pubkey).
 pub const P2PKH_INPUT_VBYTES: u64 = 148;
 /// Estimated vbytes for a legacy P2PKH output (8 value + 1 script_len + 25 script).
@@ -19,6 +21,12 @@ pub struct Utxo {
     pub vout: u32,
     pub amount: Amount,
     pub script_pubkey: ScriptBuf,
+}
+
+impl Valued for Utxo {
+    fn value(&self) -> Amount {
+        self.amount
+    }
 }
 
 impl From<&ListUnspentResultEntry> for Utxo {
@@ -49,25 +57,31 @@ impl From<Utxo> for TxIn {
     }
 }
 
-pub struct UtxoSet {
-    utxos: Vec<Utxo>,
-}
-
-impl UtxoSet {
-    pub fn new(utxos: Vec<Utxo>) -> Self {
-        Self { utxos }
-    }
-
-    /// Select the smallest UTXOs that cover `amount` + fees.
-    /// Skips UTXOs whose value is less than the fee to spend them.
-    /// Returns (selected UTXO set, estimated fee).
-    pub fn select_input(
+/// Strategy for selecting UTXOs to fund a transaction.
+pub trait CoinSelector {
+    /// Select UTXOs from `utxos` that cover `target` amount plus estimated fees.
+    /// Returns (selected UTXOs, estimated fee).
+    fn select(
         &self,
-        amount: Amount,
+        utxos: &[Utxo],
+        target: Amount,
         output_vbytes: u64,
         fee_rate: Amount,
-    ) -> Result<(UtxoSet, Amount)> {
-        let mut utxos = self.utxos.clone();
+    ) -> Result<(Vec<Utxo>, Amount)>;
+}
+
+/// Selects the smallest UTXOs first, skipping dust.
+pub struct SmallestFirst;
+
+impl CoinSelector for SmallestFirst {
+    fn select(
+        &self,
+        utxos: &[Utxo],
+        target: Amount,
+        output_vbytes: u64,
+        fee_rate: Amount,
+    ) -> Result<(Vec<Utxo>, Amount)> {
+        let mut utxos = utxos.to_vec();
         utxos.sort_by_key(|u| u.amount);
 
         let mut cur_amount = Amount::ZERO;
@@ -86,20 +100,12 @@ impl UtxoSet {
             cur_fee += input_fee;
             selected.push(utxo);
 
-            if cur_amount >= amount + cur_fee {
-                return Ok((UtxoSet::new(selected), cur_fee));
+            if cur_amount >= target + cur_fee {
+                return Ok((selected, cur_fee));
             }
         }
 
         bail!("not enough balance");
-    }
-
-    pub fn balance(&self) -> Amount {
-        self.utxos.iter().map(|u| u.amount).sum()
-    }
-
-    pub fn utxos(&self) -> &[Utxo] {
-        &self.utxos
     }
 }
 
@@ -140,6 +146,7 @@ impl TryFrom<UtxoParam> for Utxo {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::valued::ValuedSlice;
     use bitcoin::address::Address;
 
     const TXID: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -158,55 +165,59 @@ mod tests {
 
     #[test]
     fn test_select_single_utxo_covers_amount() {
-        let set = UtxoSet::new(vec![utxo(100_000)]);
-        let (selected, fee) = set
-            .select_input(
+        let utxos = vec![utxo(100_000)];
+        let (selected, fee) = SmallestFirst
+            .select(
+                &utxos,
                 Amount::from_sat(1_000),
                 P2PKH_OUTPUT_VBYTES,
                 Amount::from_sat(1),
             )
             .unwrap();
 
-        assert_eq!(selected.utxos().len(), 1);
+        assert_eq!(selected.len(), 1);
         assert!(fee > Amount::ZERO);
-        assert!(selected.balance() >= Amount::from_sat(1_000) + fee);
+        assert!(selected.total_value() >= Amount::from_sat(1_000) + fee);
     }
 
     #[test]
     fn test_select_multiple_utxos_when_one_not_enough() {
-        let set = UtxoSet::new(vec![utxo(5_000), utxo(5_000), utxo(5_000)]);
-        let (selected, fee) = set
-            .select_input(
+        let utxos = vec![utxo(5_000), utxo(5_000), utxo(5_000)];
+        let (selected, fee) = SmallestFirst
+            .select(
+                &utxos,
                 Amount::from_sat(9_000),
                 P2PKH_OUTPUT_VBYTES,
                 Amount::from_sat(1),
             )
             .unwrap();
 
-        assert!(selected.utxos().len() >= 2);
-        assert!(selected.balance() >= Amount::from_sat(9_000) + fee);
+        assert!(selected.len() >= 2);
+        assert!(selected.total_value() >= Amount::from_sat(9_000) + fee);
     }
 
     #[test]
     fn test_select_skips_dust_utxos() {
         // A UTXO worth less than the fee to spend it (148 sat at 1 sat/vB) should be skipped
-        let set = UtxoSet::new(vec![utxo(100), utxo(100_000)]);
-        let (selected, _fee) = set
-            .select_input(
+        let utxos = vec![utxo(100), utxo(100_000)];
+        let (selected, _fee) = SmallestFirst
+            .select(
+                &utxos,
                 Amount::from_sat(1_000),
                 P2PKH_OUTPUT_VBYTES,
                 Amount::from_sat(1),
             )
             .unwrap();
 
-        assert_eq!(selected.utxos().len(), 1);
-        assert_eq!(selected.utxos()[0].amount, Amount::from_sat(100_000));
+        assert_eq!(selected.len(), 1);
+        assert_eq!(selected[0].amount, Amount::from_sat(100_000));
     }
 
     #[test]
     fn test_select_fails_on_insufficient_balance() {
-        let set = UtxoSet::new(vec![utxo(500)]);
-        let result = set.select_input(
+        let utxos = vec![utxo(500)];
+        let result = SmallestFirst.select(
+            &utxos,
             Amount::from_sat(100_000),
             P2PKH_OUTPUT_VBYTES,
             Amount::from_sat(1),
@@ -221,8 +232,8 @@ mod tests {
 
     #[test]
     fn test_select_fails_on_empty_set() {
-        let set = UtxoSet::new(vec![]);
-        let result = set.select_input(
+        let result = SmallestFirst.select(
+            &[],
             Amount::from_sat(1_000),
             P2PKH_OUTPUT_VBYTES,
             Amount::from_sat(1),
@@ -234,8 +245,9 @@ mod tests {
     #[test]
     fn test_select_all_dust_fails() {
         // All UTXOs cost more to spend than they're worth
-        let set = UtxoSet::new(vec![utxo(100), utxo(50), utxo(148)]);
-        let result = set.select_input(
+        let utxos = vec![utxo(100), utxo(50), utxo(148)];
+        let result = SmallestFirst.select(
+            &utxos,
             Amount::from_sat(1_000),
             P2PKH_OUTPUT_VBYTES,
             Amount::from_sat(1),

@@ -58,7 +58,8 @@ pub struct TransactionParam {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::utxoset::{Utxo, UtxoSet};
+    use crate::utxoset::Utxo;
+    use crate::valued::ValuedSlice;
     use bitcoin::{Address, Amount, Network, Txid};
     use std::str::FromStr;
     fn test_address() -> Address {
@@ -106,7 +107,7 @@ mod tests {
         let params = unchecked.check(Network::Testnet).unwrap();
 
         assert_eq!(params.utxos.len(), 1);
-        assert_eq!(UtxoSet::new(utxos).balance(), Amount::from_sat(50_000));
+        assert_eq!(utxos.total_value(), Amount::from_sat(50_000));
     }
 
     #[test]
