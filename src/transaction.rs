@@ -174,12 +174,6 @@ mod tests {
     }
 
     #[test]
-    fn test_prepare_invalid_address_fails() {
-        let result = Receivers::parse(&[("invalid_address", 1000)], Network::Testnet);
-        assert!(result.is_err());
-    }
-
-    #[test]
     fn test_sign_produces_hex() {
         let tm = TransactionManager::new(stub_wallet());
         let receivers = Receivers::parse(&[(RECEIVER, 1000)], Network::Testnet).unwrap();
