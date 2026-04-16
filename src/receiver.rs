@@ -11,13 +11,6 @@ pub struct ReceiverUnchecked {
 }
 
 impl ReceiverUnchecked {
-    pub fn new(address: &Address, amount: Amount) -> Self {
-        Self {
-            address: address.to_string(),
-            amount_sat: amount.to_sat(),
-        }
-    }
-
     /// Check the network, prevent fund sent to the wrong network
     pub fn check(self, network: Network) -> Result<Receiver> {
         let address = Address::from_str(&self.address)?
@@ -27,6 +20,15 @@ impl ReceiverUnchecked {
             address,
             amount: Amount::from_sat(self.amount_sat),
         })
+    }
+}
+
+impl From<&Receiver> for ReceiverUnchecked {
+    fn from(r: &Receiver) -> Self {
+        Self {
+            address: r.address.to_string(),
+            amount_sat: r.amount.to_sat(),
+        }
     }
 }
 
@@ -40,19 +42,33 @@ impl Receiver {
     pub fn new(address: Address, amount: Amount) -> Self {
         Self { address, amount }
     }
+}
 
-    pub fn to_unchecked(&self) -> ReceiverUnchecked {
-        ReceiverUnchecked {
-            address: self.address.to_string(),
-            amount_sat: self.amount.to_sat(),
+impl From<&Receiver> for TxOut {
+    fn from(r: &Receiver) -> Self {
+        TxOut {
+            value: r.amount,
+            script_pubkey: r.address.script_pubkey(),
         }
     }
+}
 
-    pub fn to_tx_out(&self) -> TxOut {
-        TxOut {
-            value: self.amount,
-            script_pubkey: self.address.script_pubkey(),
+/// Unchecked collection of receivers, deserialized directly from JSON.
+/// Call `.check(network)` to validate all addresses at once.
+#[derive(Serialize, Deserialize)]
+pub struct ReceiversUnchecked(pub Vec<ReceiverUnchecked>);
+
+impl ReceiversUnchecked {
+    pub fn check(self, network: Network) -> Result<Receivers> {
+        if self.0.is_empty() {
+            bail!("at least one receiver is required");
         }
+        let items: Vec<Receiver> = self
+            .0
+            .into_iter()
+            .map(|r| r.check(network))
+            .collect::<Result<_>>()?;
+        Ok(Receivers(items))
     }
 }
 
@@ -83,8 +99,8 @@ impl Receivers {
         self.0.push(receiver);
     }
 
-    pub fn into_unchecked(self) -> Vec<ReceiverUnchecked> {
-        self.0.iter().map(|r| r.to_unchecked()).collect()
+    pub fn receivers(&self) -> &[Receiver] {
+        &self.0
     }
 
     /// Sum the serialized vbytes of all outputs (8 bytes value + 1 byte script len + script).
@@ -95,6 +111,12 @@ impl Receivers {
             total += 8 + 1 + script_len;
         }
         total
+    }
+}
+
+impl From<Receivers> for Vec<ReceiverUnchecked> {
+    fn from(rs: Receivers) -> Self {
+        rs.0.iter().map(ReceiverUnchecked::from).collect()
     }
 }
 
@@ -113,7 +135,7 @@ mod tests {
     fn test_receiver_to_tx_out() {
         let addr = test_address();
         let r = Receiver::new(addr.clone(), Amount::from_sat(5000));
-        let out = r.to_tx_out();
+        let out = TxOut::from(&r);
         assert_eq!(out.value, Amount::from_sat(5000));
         assert_eq!(out.script_pubkey, addr.script_pubkey());
     }

@@ -1,17 +1,19 @@
 use crate::{
     btcclient::BtcClient,
     params::{TransactionParam, TransactionParamUnchecked},
-    receiver::{Receiver, Receivers},
+    receiver::{Receiver, ReceiverUnchecked, Receivers},
     utxoset::P2PKH_OUTPUT_VBYTES,
     wallet::Wallet,
 };
 use anyhow::Result;
 use bitcoin::{
+    absolute::LockTime,
     consensus::encode::serialize_hex,
     ecdsa::Signature as BtcSig,
     script::{self, PushBytes},
     sighash::SighashCache,
-    EcdsaSighashType, TxOut,
+    transaction::Version,
+    EcdsaSighashType, Transaction, TxOut,
 };
 use secp256k1::Secp256k1;
 
@@ -51,8 +53,9 @@ impl TransactionManager {
             receivers.push(Receiver::new(sender.clone(), raw_change));
         }
 
+        let unchecked_receivers: Vec<ReceiverUnchecked> = receivers.into();
         Ok(TransactionParamUnchecked::new(
-            receivers.into_unchecked(),
+            unchecked_receivers,
             inputs.utxos(),
         ))
     }
@@ -60,7 +63,7 @@ impl TransactionManager {
     /// Sign a transaction from params (offline, no network access)
     /// Returns the broadcast-ready hex string
     pub fn sign(&self, params: &TransactionParam) -> Result<String> {
-        let mut tx = params.to_unsigned_tx();
+        let mut tx = Self::build_unsigned_tx(params);
 
         let secret_key = &self.wallet.secret_key;
         let pubkey = &self.wallet.public_key;
@@ -93,6 +96,16 @@ impl TransactionManager {
         }
 
         Ok(serialize_hex(&tx))
+    }
+
+    fn build_unsigned_tx(params: &TransactionParam) -> Transaction {
+        let outputs: Vec<TxOut> = params.receivers.iter().map(TxOut::from).collect();
+        Transaction {
+            version: Version::TWO,
+            lock_time: LockTime::ZERO,
+            input: params.utxos.iter().map(|u| u.into()).collect(),
+            output: outputs,
+        }
     }
 }
 
