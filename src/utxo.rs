@@ -4,14 +4,14 @@ use bitcoincore_rpc::json::ListUnspentResultEntry;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
-/// Estimated vbytes for a legacy P2PKH input (script_sig: push sig + push pubkey).
+/// Estimated vbytes for a legacy P2PKH input (script_sig: push sig + push pubkey)
 pub const P2PKH_INPUT_VBYTES: u64 = 148;
-/// Estimated vbytes for a legacy P2PKH output (8 value + 1 script_len + 25 script).
+/// Estimated vbytes for a legacy P2PKH output (8 value + 1 script_len + 25 script)
 pub const P2PKH_OUTPUT_VBYTES: u64 = 34;
-/// Overhead vbytes for a transaction (version + locktime + input/output counts).
+/// Overhead vbytes for a transaction (version + locktime + input/output counts)
 const TX_OVERHEAD_VBYTES: u64 = 10;
 
-/// Custom Utxo type to decouple from RPC client implementations.
+/// Custom Utxo type to decouple from RPC client implementations
 #[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
 #[serde(try_from = "UtxoRaw", into = "UtxoRaw")]
 pub struct Utxo {
@@ -92,10 +92,10 @@ impl From<Utxo> for TxIn {
     }
 }
 
-/// Strategy for selecting UTXOs to fund a transaction.
+/// Strategy for selecting UTXOs to fund a transaction
 pub trait CoinSelector {
-    /// Select UTXOs from `utxos` that cover `target` amount plus estimated fees.
-    /// Returns (selected UTXOs, estimated fee).
+    /// Select UTXOs from `utxos` that cover `target` amount plus estimated fees,
+    /// returns (selected UTXOs, estimated fee).
     fn select(
         &self,
         utxos: &[Utxo],
@@ -105,7 +105,7 @@ pub trait CoinSelector {
     ) -> Result<(Vec<Utxo>, Amount)>;
 }
 
-/// Selects the smallest UTXOs first, skipping dust.
+/// Selects the smallest UTXOs first, skipping dust
 pub struct SmallestFirst;
 
 impl CoinSelector for SmallestFirst {

@@ -1,17 +1,15 @@
 use crate::{
     btcclient::BtcClient,
-    params::{self, Receiver, TransactionParam},
+    params::{output_vbytes, Receiver, TransactionParam},
     utxo::{CoinSelector, P2PKH_OUTPUT_VBYTES},
     wallet::Wallet,
 };
 use anyhow::Result;
 use bitcoin::{
-    absolute::LockTime,
     consensus::encode::serialize_hex,
     ecdsa::Signature as BtcSig,
     script::{self, PushBytes},
     sighash::SighashCache,
-    transaction::Version,
     Amount, EcdsaSighashType, Transaction, TxOut,
 };
 use secp256k1::Secp256k1;
@@ -41,7 +39,7 @@ impl TransactionManager {
 
         // Select inputs that cover amount and fee
         let utxos = client.get_utxos(&self.wallet.address)?;
-        let output_vbytes = params::output_vbytes(&receivers) + P2PKH_OUTPUT_VBYTES;
+        let output_vbytes = output_vbytes(&receivers) + P2PKH_OUTPUT_VBYTES;
         let (selected, fee) =
             selector.select(&utxos, total_out, output_vbytes, client.get_fee_rate()?)?;
 

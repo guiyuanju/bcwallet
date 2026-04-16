@@ -8,14 +8,14 @@ use std::{
     str::FromStr,
 };
 
-/// JSON representation of wallet on disk.
+/// JSON representation of wallet on disk
 #[derive(Serialize, Deserialize)]
 pub struct WalletUnchecked {
     pub private_key: String,
     pub address: String,
 }
 
-/// In-memory wallet with pre-parsed key material.
+/// In-memory wallet with pre-parsed key material
 pub struct Wallet {
     pub secret_key: SecretKey,
     pub public_key: PublicKey,
@@ -24,7 +24,6 @@ pub struct Wallet {
 }
 
 impl Wallet {
-    #[warn(dead_code)]
     pub fn new(pk: &str, addr: &str, network: Network) -> Result<Self> {
         Wallet::parse(
             WalletUnchecked {
