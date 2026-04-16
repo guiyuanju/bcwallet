@@ -1,11 +1,12 @@
 use crate::receiver::{Receiver, ReceiverUnchecked};
-use crate::utxoset::Utxo;
+use crate::utxo::Utxo;
 use anyhow::{Context, Result};
 use bitcoin::Network;
 use serde::{Deserialize, Serialize};
 use std::{
     fs::File,
     io::{BufReader, Write},
+    path::Path,
 };
 
 /// Unchecked transaction parameters parsed from JSON
@@ -55,10 +56,24 @@ pub struct TransactionParam {
     pub utxos: Vec<Utxo>,
 }
 
+impl TransactionParam {
+    pub fn new(receivers: Vec<Receiver>, utxos: Vec<Utxo>) -> Self {
+        Self { receivers, utxos }
+    }
+
+    pub fn save_as_file(&self, path: &str) -> Result<()> {
+        let unchecked = TransactionParamUnchecked::new(
+            self.receivers.iter().map(ReceiverUnchecked::from).collect(),
+            &self.utxos,
+        );
+        unchecked.save_as_file(path)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::utxoset::Utxo;
+    use crate::utxo::Utxo;
     use crate::valued::ValuedSlice;
     use bitcoin::{Address, Amount, Network, Txid};
     use std::str::FromStr;

@@ -1,4 +1,4 @@
-use crate::utxoset::Utxo;
+use crate::utxo::Utxo;
 use crate::valued::ValuedSlice;
 use anyhow::{bail, Context, Result};
 use bitcoin::{Address, Amount, Txid};

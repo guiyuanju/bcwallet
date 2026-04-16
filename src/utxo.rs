@@ -1,6 +1,7 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
 use bitcoin::{Amount, OutPoint, ScriptBuf, Sequence, TxIn, Txid, Witness};
 use bitcoincore_rpc::json::ListUnspentResultEntry;
+use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
@@ -14,13 +15,43 @@ pub const P2PKH_OUTPUT_VBYTES: u64 = 34;
 const TX_OVERHEAD_VBYTES: u64 = 10;
 
 /// Custom Utxo type to decouple from RPC client implementations.
-#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
-#[serde(into = "UtxoParam", try_from = "UtxoParam")]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Utxo {
     pub txid: Txid,
     pub vout: u32,
     pub amount: Amount,
     pub script_pubkey: ScriptBuf,
+}
+
+impl Serialize for Utxo {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut s = serializer.serialize_struct("Utxo", 4)?;
+        s.serialize_field("txid", &self.txid.to_string())?;
+        s.serialize_field("vout", &self.vout)?;
+        s.serialize_field("amount_sat", &self.amount.to_sat())?;
+        s.serialize_field("script_pubkey", &self.script_pubkey.to_hex_string())?;
+        s.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for Utxo {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        struct Raw {
+            txid: String,
+            vout: u32,
+            amount_sat: u64,
+            script_pubkey: String,
+        }
+        let raw = Raw::deserialize(deserializer)?;
+        Ok(Self {
+            txid: Txid::from_str(&raw.txid).map_err(serde::de::Error::custom)?,
+            vout: raw.vout,
+            amount: Amount::from_sat(raw.amount_sat),
+            script_pubkey: ScriptBuf::from_hex(&raw.script_pubkey)
+                .map_err(serde::de::Error::custom)?,
+        })
+    }
 }
 
 impl Valued for Utxo {
@@ -106,40 +137,6 @@ impl CoinSelector for SmallestFirst {
         }
 
         bail!("not enough balance");
-    }
-}
-
-/// Private serialization proxy for [`Utxo`].
-#[derive(Serialize, Deserialize)]
-struct UtxoParam {
-    txid: String,
-    vout: u32,
-    amount_sat: u64,
-    script_pubkey: String, // hex-encoded
-}
-
-impl From<Utxo> for UtxoParam {
-    fn from(utxo: Utxo) -> Self {
-        Self {
-            txid: utxo.txid.to_string(),
-            vout: utxo.vout,
-            amount_sat: utxo.amount.to_sat(),
-            script_pubkey: utxo.script_pubkey.to_hex_string(),
-        }
-    }
-}
-
-impl TryFrom<UtxoParam> for Utxo {
-    type Error = anyhow::Error;
-
-    fn try_from(p: UtxoParam) -> Result<Self> {
-        Ok(Self {
-            txid: Txid::from_str(&p.txid).context("invalid txid")?,
-            vout: p.vout,
-            amount: Amount::from_sat(p.amount_sat),
-            script_pubkey: ScriptBuf::from_hex(&p.script_pubkey)
-                .context("invalid script_pubkey hex")?,
-        })
     }
 }
 

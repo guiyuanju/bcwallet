@@ -2,7 +2,7 @@ mod btcclient;
 mod params;
 mod receiver;
 mod transaction;
-mod utxoset;
+mod utxo;
 mod valued;
 mod wallet;
 
@@ -11,7 +11,7 @@ use crate::{
     params::TransactionParamUnchecked,
     receiver::parse_receivers,
     transaction::TransactionManager,
-    utxoset::SmallestFirst,
+    utxo::SmallestFirst,
     wallet::Wallet,
 };
 use anyhow::{bail, Context, Result};

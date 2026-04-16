@@ -1,8 +1,8 @@
 use crate::{
     btcclient::BtcClient,
-    params::{TransactionParam, TransactionParamUnchecked},
-    receiver::{Receiver, ReceiverSliceExt, ReceiverUnchecked},
-    utxoset::{CoinSelector, P2PKH_OUTPUT_VBYTES},
+    params::TransactionParam,
+    receiver::{Receiver, ReceiverSliceExt},
+    utxo::{CoinSelector, P2PKH_OUTPUT_VBYTES},
     valued::ValuedSlice,
     wallet::Wallet,
 };
@@ -38,7 +38,7 @@ impl TransactionManager {
         client: &T,
         mut receivers: Vec<Receiver>,
         selector: &dyn CoinSelector,
-    ) -> Result<TransactionParamUnchecked> {
+    ) -> Result<TransactionParam> {
         let total_out = receivers.total_value();
 
         // Select inputs that cover amount and fee
@@ -55,12 +55,7 @@ impl TransactionManager {
             receivers.push(Receiver::new(sender.clone(), raw_change));
         }
 
-        let unchecked_receivers: Vec<ReceiverUnchecked> =
-            receivers.iter().map(ReceiverUnchecked::from).collect();
-        Ok(TransactionParamUnchecked::new(
-            unchecked_receivers,
-            &selected,
-        ))
+        Ok(TransactionParam::new(receivers, selected))
     }
 
     /// Sign a transaction from params (offline, no network access)
@@ -117,7 +112,7 @@ mod tests {
     use super::*;
     use crate::{
         receiver::parse_receivers,
-        utxoset::{SmallestFirst, Utxo},
+        utxo::{SmallestFirst, Utxo},
     };
     use bitcoin::{Address, Amount, Network, Txid};
     use std::{cell::RefCell, str::FromStr};
@@ -184,21 +179,24 @@ mod tests {
     fn test_prepare_single_receiver() {
         let tm = TransactionManager::new(stub_wallet());
         let receivers = parse_receivers(&[(RECEIVER, 1000)], Network::Testnet).unwrap();
-        let params = tm.prepare(&mock_client(), receivers, &SmallestFirst).unwrap();
+        let params = tm
+            .prepare(&mock_client(), receivers, &SmallestFirst)
+            .unwrap();
 
         assert!(!params.utxos.is_empty());
         assert!(params.receivers.len() >= 1);
-        assert_eq!(params.receivers[0].amount_sat, 1000);
+        assert_eq!(params.receivers[0].amount, Amount::from_sat(1000));
     }
 
     #[test]
     fn test_sign_produces_hex() {
         let tm = TransactionManager::new(stub_wallet());
         let receivers = parse_receivers(&[(RECEIVER, 1000)], Network::Testnet).unwrap();
-        let params = tm.prepare(&mock_client(), receivers, &SmallestFirst).unwrap();
-        let checked = params.check(Network::Testnet).unwrap();
+        let params = tm
+            .prepare(&mock_client(), receivers, &SmallestFirst)
+            .unwrap();
 
-        let hex = tm.sign(&checked).unwrap();
+        let hex = tm.sign(&params).unwrap();
         assert!(!hex.is_empty());
         // Valid hex string (even length, all hex chars)
         assert!(hex.len() % 2 == 0);
@@ -209,11 +207,12 @@ mod tests {
     fn test_sign_is_deterministic() {
         let tm = TransactionManager::new(stub_wallet());
         let receivers = parse_receivers(&[(RECEIVER, 1000)], Network::Testnet).unwrap();
-        let params = tm.prepare(&mock_client(), receivers, &SmallestFirst).unwrap();
-        let checked = params.check(Network::Testnet).unwrap();
+        let params = tm
+            .prepare(&mock_client(), receivers, &SmallestFirst)
+            .unwrap();
 
-        let hex1 = tm.sign(&checked).unwrap();
-        let hex2 = tm.sign(&checked).unwrap();
+        let hex1 = tm.sign(&params).unwrap();
+        let hex2 = tm.sign(&params).unwrap();
         assert_eq!(hex1, hex2);
     }
 
@@ -222,12 +221,14 @@ mod tests {
         let tm = TransactionManager::new(stub_wallet());
         let receivers =
             parse_receivers(&[(RECEIVER, 500), (RECEIVER, 500)], Network::Testnet).unwrap();
-        let params = tm.prepare(&mock_client(), receivers, &SmallestFirst).unwrap();
+        let params = tm
+            .prepare(&mock_client(), receivers, &SmallestFirst)
+            .unwrap();
 
         // At least the 2 explicit receivers
         assert!(params.receivers.len() >= 2);
-        assert_eq!(params.receivers[0].amount_sat, 500);
-        assert_eq!(params.receivers[1].amount_sat, 500);
+        assert_eq!(params.receivers[0].amount, Amount::from_sat(500));
+        assert_eq!(params.receivers[1].amount, Amount::from_sat(500));
     }
 
     #[test]
@@ -236,9 +237,8 @@ mod tests {
         let client = mock_client();
         let receivers = parse_receivers(&[(RECEIVER, 1000)], Network::Testnet).unwrap();
         let params = tm.prepare(&client, receivers, &SmallestFirst).unwrap();
-        let checked = params.check(Network::Testnet).unwrap();
 
-        let tx_hex = tm.sign(&checked).unwrap();
+        let tx_hex = tm.sign(&params).unwrap();
         let txid = client.send_raw_transaction(&tx_hex).unwrap();
 
         assert_eq!(
