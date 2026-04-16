@@ -136,3 +136,111 @@ impl TryFrom<UtxoParam> for Utxo {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bitcoin::address::Address;
+
+    const TXID: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+    fn utxo(sat: u64) -> Utxo {
+        let addr = Address::from_str("mwqmgMkf6ZsX2wxSK6GA2JRMVswBo29UWX")
+            .unwrap()
+            .assume_checked();
+        Utxo {
+            txid: Txid::from_str(TXID).unwrap(),
+            vout: 0,
+            amount: Amount::from_sat(sat),
+            script_pubkey: addr.script_pubkey(),
+        }
+    }
+
+    #[test]
+    fn test_select_single_utxo_covers_amount() {
+        let set = UtxoSet::new(vec![utxo(100_000)]);
+        let (selected, fee) = set
+            .select_input(
+                Amount::from_sat(1_000),
+                P2PKH_OUTPUT_VBYTES,
+                Amount::from_sat(1),
+            )
+            .unwrap();
+
+        assert_eq!(selected.utxos().len(), 1);
+        assert!(fee > Amount::ZERO);
+        assert!(selected.balance() >= Amount::from_sat(1_000) + fee);
+    }
+
+    #[test]
+    fn test_select_multiple_utxos_when_one_not_enough() {
+        let set = UtxoSet::new(vec![utxo(5_000), utxo(5_000), utxo(5_000)]);
+        let (selected, fee) = set
+            .select_input(
+                Amount::from_sat(9_000),
+                P2PKH_OUTPUT_VBYTES,
+                Amount::from_sat(1),
+            )
+            .unwrap();
+
+        assert!(selected.utxos().len() >= 2);
+        assert!(selected.balance() >= Amount::from_sat(9_000) + fee);
+    }
+
+    #[test]
+    fn test_select_skips_dust_utxos() {
+        // A UTXO worth less than the fee to spend it (148 sat at 1 sat/vB) should be skipped
+        let set = UtxoSet::new(vec![utxo(100), utxo(100_000)]);
+        let (selected, _fee) = set
+            .select_input(
+                Amount::from_sat(1_000),
+                P2PKH_OUTPUT_VBYTES,
+                Amount::from_sat(1),
+            )
+            .unwrap();
+
+        assert_eq!(selected.utxos().len(), 1);
+        assert_eq!(selected.utxos()[0].amount, Amount::from_sat(100_000));
+    }
+
+    #[test]
+    fn test_select_fails_on_insufficient_balance() {
+        let set = UtxoSet::new(vec![utxo(500)]);
+        let result = set.select_input(
+            Amount::from_sat(100_000),
+            P2PKH_OUTPUT_VBYTES,
+            Amount::from_sat(1),
+        );
+
+        let err = match result {
+            Err(e) => e,
+            Ok(_) => panic!("expected error"),
+        };
+        assert!(err.to_string().contains("not enough balance"));
+    }
+
+    #[test]
+    fn test_select_fails_on_empty_set() {
+        let set = UtxoSet::new(vec![]);
+        let result = set.select_input(
+            Amount::from_sat(1_000),
+            P2PKH_OUTPUT_VBYTES,
+            Amount::from_sat(1),
+        );
+
+        assert!(matches!(result, Err(_)));
+    }
+
+    #[test]
+    fn test_select_all_dust_fails() {
+        // All UTXOs cost more to spend than they're worth
+        let set = UtxoSet::new(vec![utxo(100), utxo(50), utxo(148)]);
+        let result = set.select_input(
+            Amount::from_sat(1_000),
+            P2PKH_OUTPUT_VBYTES,
+            Amount::from_sat(1),
+        );
+
+        assert!(matches!(result, Err(_)));
+    }
+}
