@@ -98,7 +98,7 @@ mod tests {
         let utxos = vec![test_utxo()];
         let params = TransactionParams::new(receivers, &utxos);
 
-        let tx = params.to_unsigned_tx(&utxos, Network::Testnet).unwrap();
+        let tx = params.to_unsigned_tx(Network::Testnet).unwrap();
         assert_eq!(tx.input.len(), 1);
         assert_eq!(tx.output.len(), 1);
         assert_eq!(tx.output[0].value, Amount::from_sat(10_000));
