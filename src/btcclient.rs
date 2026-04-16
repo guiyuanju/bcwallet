@@ -17,11 +17,11 @@ pub trait BtcClient {
 }
 
 /// Client for communicating with a local Bitcoin Core node.
-pub struct LocalRpc {
+pub struct RpcClient {
     client: Client,
 }
 
-impl LocalRpc {
+impl RpcClient {
     pub fn new(port: &str, username: &str, passwd: &str) -> Result<Self> {
         let url = format!("http://127.0.0.1:{port}");
         let auth = Auth::UserPass(username.to_owned(), passwd.to_owned());
@@ -61,7 +61,7 @@ impl LocalRpc {
     }
 }
 
-impl BtcClient for LocalRpc {
+impl BtcClient for RpcClient {
     fn get_utxos(&self, addr: &Address) -> Result<Vec<Utxo>> {
         Ok(self
             .client

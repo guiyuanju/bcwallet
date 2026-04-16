@@ -5,7 +5,7 @@ mod utxo;
 mod wallet;
 
 use crate::{
-    btcclient::{BtcClient, LocalRpc},
+    btcclient::{BtcClient, RpcClient},
     params::{ReceiverUnchecked, TransactionParamUnchecked},
     transaction::TransactionManager,
     utxo::SmallestFirst,
@@ -122,8 +122,8 @@ impl Config {
         })
     }
 
-    fn btc_client(&self) -> Result<LocalRpc> {
-        LocalRpc::new(&self.rpc_port, &self.rpc_user, &self.rpc_pass)
+    fn btc_client(&self) -> Result<RpcClient> {
+        RpcClient::new(&self.rpc_port, &self.rpc_user, &self.rpc_pass)
     }
 
     fn wallet(&self) -> Result<Wallet> {
