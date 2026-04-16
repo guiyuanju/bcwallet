@@ -57,3 +57,8 @@ Commands:
 Options:
   -h, --help  Print help
 ```
+
+## Limitations
+
+- Sender address only support legacy P2PKH
+- Doesn't support Multi-Sig
