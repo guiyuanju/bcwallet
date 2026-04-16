@@ -1,25 +1,33 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use bitcoin::{Address, Network, PrivateKey, PublicKey};
-use secp256k1::{Secp256k1, SecretKey, rand::rngs::OsRng};
+use secp256k1::{rand::rngs::OsRng, Secp256k1, SecretKey};
 use serde::{Deserialize, Serialize};
 use std::{
     fs::{File, OpenOptions},
     io::{BufReader, Write},
+    str::FromStr,
 };
 
 /// JSON representation of wallet on disk.
 #[derive(Serialize, Deserialize)]
-struct WalletFile {
-    private_key: String,
-    address: String,
+pub struct WalletFile {
+    pub private_key: String,
+    pub address: String,
+    #[serde(skip, default = "default_network")]
+    pub network: Network,
+}
+
+fn default_network() -> Network {
+    Network::Bitcoin
 }
 
 /// In-memory wallet with pre-parsed key material.
 pub struct Wallet {
-    wif: String,
-    secret_key: SecretKey,
-    public_key: PublicKey,
-    address: Address,
+    pub wif: String,
+    pub secret_key: SecretKey,
+    pub public_key: PublicKey,
+    pub address: Address,
+    pub network: Network,
 }
 
 impl Wallet {
@@ -35,40 +43,24 @@ impl Wallet {
             secret_key,
             public_key,
             address,
+            network,
         }
     }
 
     pub fn from_file(file_path: &str, network: Network) -> Result<Self> {
         let file = File::open(file_path).context("failed to open wallet file")?;
         let reader = BufReader::new(file);
-        let wf: WalletFile =
+        let mut wf: WalletFile =
             serde_json::from_reader(reader).context("failed to deserialize wallet file")?;
-
-        let privkey =
-            PrivateKey::from_wif(&wf.private_key).context("failed to parse private key WIF")?;
-        let secp = Secp256k1::new();
-        let public_key = PublicKey::from_private_key(&secp, &privkey);
-        let expected_addr = Address::p2pkh(public_key, network);
-
-        if expected_addr.to_string() != wf.address {
-            bail!(
-                "wallet address does not match private key for network {}",
-                network
-            );
-        }
-
-        Ok(Self {
-            wif: wf.private_key,
-            secret_key: privkey.inner,
-            public_key,
-            address: expected_addr,
-        })
+        wf.network = network;
+        Wallet::try_from(wf)
     }
 
     pub fn save(&self, file_path: &str) -> Result<()> {
         let wf = WalletFile {
             private_key: self.wif.clone(),
             address: self.address.to_string(),
+            network: self.network,
         };
         let json =
             serde_json::to_string_pretty(&wf).context("failed to serialize wallet to json")?;
@@ -78,17 +70,35 @@ impl Wallet {
             .open(file_path)?;
         writeln!(file, "{}", json).context("failed to write to wallet")
     }
+}
 
-    pub fn secret_key(&self) -> &SecretKey {
-        &self.secret_key
-    }
+impl TryFrom<WalletFile> for Wallet {
+    type Error = anyhow::Error;
 
-    pub fn public_key(&self) -> &PublicKey {
-        &self.public_key
-    }
+    fn try_from(wf: WalletFile) -> Result<Self> {
+        let network = wf.network;
+        let privkey =
+            PrivateKey::from_wif(&wf.private_key).context("failed to parse private key WIF")?;
+        let secp = Secp256k1::new();
+        let public_key = PublicKey::from_private_key(&secp, &privkey);
+        let expected_addr = Address::p2pkh(public_key, network);
 
-    pub fn address(&self) -> &Address {
-        &self.address
+        if !wf.address.is_empty() {
+            let stored_addr = Address::from_str(&wf.address)?
+                .require_network(network)
+                .context("wallet was created for a different network")?;
+            if stored_addr != expected_addr {
+                bail!("wallet address does not match private key");
+            }
+        }
+
+        Ok(Wallet {
+            wif: wf.private_key,
+            secret_key: privkey.inner,
+            public_key,
+            address: expected_addr,
+            network,
+        })
     }
 }
 
@@ -106,6 +116,6 @@ mod tests {
             Network::Testnet,
         );
 
-        assert_eq!(&addr, wallet.address());
+        assert_eq!(&addr, &wallet.address);
     }
 }

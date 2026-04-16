@@ -1,17 +1,19 @@
 mod btcclient;
 mod params;
+mod receiver;
 mod transaction;
 mod utxoset;
 mod wallet;
 
 use crate::{
     btcclient::{BtcClient, LocalRpc},
-    params::{Receivers, TransactionParams},
+    params::TransactionParams,
+    receiver::Receivers,
     transaction::TransactionManager,
     wallet::Wallet,
 };
-use anyhow::{Context, Result, bail};
-use bitcoin::{Network, base58};
+use anyhow::{bail, Context, Result};
+use bitcoin::Network;
 use clap::{Parser, Subcommand};
 use std::env;
 
@@ -29,8 +31,6 @@ enum Commands {
     Balance,
     /// Watch current address, need only called once for each new address
     Watch,
-    /// Decode a base58 encoded string
-    DecodeBase58 { src: String },
     /// Prepare transaction params file (online, requires RPC)
     Prepare {
         /// Receivers in "address:amount_sat" format (repeatable)
@@ -45,6 +45,58 @@ enum Commands {
         /// Path to params.json
         params: String,
     },
+    /// Send a signed transaction hex to the network
+    Send {
+        /// The raw transaction hex to broadcast
+        hex: String,
+    },
+}
+
+fn main() -> Result<()> {
+    let cfg = Config::from_env()?;
+    let cli = Cli::parse();
+
+    match cli.command {
+        Commands::NewWallet => {
+            let wallet = Wallet::generate(cfg.network);
+            wallet.save(&cfg.wallet_path)?;
+        }
+        Commands::Balance => {
+            let wallet = cfg.wallet()?;
+            let balance = cfg.btc_client()?.get_balance(&wallet.address)?;
+            println!("{}", balance);
+        }
+        Commands::Watch => {
+            let wallet = cfg.wallet()?;
+            cfg.btc_client()?.watch_addresses(&[&wallet.address])?;
+        }
+        Commands::Prepare { receiver, output } => {
+            // Parse receivers
+            let raw: Vec<(&str, u64)> = receiver
+                .iter()
+                .map(|r| parse_receiver(r))
+                .collect::<Result<_>>()?;
+            let receivers = Receivers::parse(&raw, cfg.network)?;
+
+            // Generate and save unsigned transaction
+            let tm = TransactionManager::new(cfg.wallet()?);
+            let params = tm.prepare(&cfg.btc_client()?, receivers)?;
+            params.save_as_file(&output)?;
+
+            println!("Params written to {}", output);
+        }
+        Commands::Sign { params } => {
+            let tx_params = TransactionParams::from_file(&params, cfg.network)?;
+            let tm = TransactionManager::new(cfg.wallet()?);
+            println!("{}", tm.sign(&tx_params)?);
+        }
+        Commands::Send { hex } => {
+            let txid = cfg.btc_client()?.send_raw_transaction(&hex)?;
+            println!("{txid}");
+        }
+    }
+
+    Ok(())
 }
 
 struct Config {
@@ -73,57 +125,13 @@ impl Config {
         })
     }
 
-    fn rpc_client(&self) -> Result<LocalRpc> {
+    fn btc_client(&self) -> Result<LocalRpc> {
         LocalRpc::new(&self.rpc_port, &self.rpc_user, &self.rpc_pass)
     }
 
     fn wallet(&self) -> Result<Wallet> {
         Wallet::from_file(&self.wallet_path, self.network)
     }
-}
-
-fn main() -> Result<()> {
-    let cfg = Config::from_env()?;
-    let cli = Cli::parse();
-
-    match cli.command {
-        Commands::NewWallet => {
-            let wallet = Wallet::generate(cfg.network);
-            wallet.save(&cfg.wallet_path)?;
-        }
-        Commands::Balance => {
-            let wallet = cfg.wallet()?;
-            let balance = cfg.rpc_client()?.get_balance(wallet.address())?;
-            println!("{}", balance);
-        }
-        Commands::Watch => {
-            let wallet = cfg.wallet()?;
-            cfg.rpc_client()?.watch_address(&[wallet.address()])?;
-        }
-        Commands::DecodeBase58 { src } => {
-            let bytes = base58::decode(&src).context("failed to decode base58")?;
-            let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
-            println!("{hex}");
-        }
-        Commands::Prepare { receiver, output } => {
-            let raw: Vec<(&str, u64)> = receiver
-                .iter()
-                .map(|r| parse_receiver(r))
-                .collect::<Result<_>>()?;
-            let receivers = Receivers::parse(&raw, cfg.network)?;
-            let tm = TransactionManager::new(cfg.wallet()?, cfg.network);
-            let params = tm.prepare(cfg.rpc_client()?, receivers)?;
-            params.save(&output)?;
-            eprintln!("Params written to {}", output);
-        }
-        Commands::Sign { params } => {
-            let tx_params = TransactionParams::load(&params, cfg.network)?;
-            let tm = TransactionManager::new(cfg.wallet()?, cfg.network);
-            println!("{}", tm.sign(&tx_params)?);
-        }
-    }
-
-    Ok(())
 }
 
 /// Parse "address:amount_sat" into (address, amount_sat).
@@ -134,6 +142,3 @@ fn parse_receiver(s: &str) -> Result<(&str, u64)> {
     let sat: u64 = amt.parse().context("invalid amount_sat")?;
     Ok((addr, sat))
 }
-
-#[cfg(test)]
-mod tests {}

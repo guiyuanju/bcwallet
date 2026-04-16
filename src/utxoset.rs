@@ -1,9 +1,19 @@
-use anyhow::{Result, bail};
+use anyhow::{bail, Context, Result};
 use bitcoin::{Amount, OutPoint, ScriptBuf, Sequence, TxIn, Txid, Witness};
 use bitcoincore_rpc::json::ListUnspentResultEntry;
+use serde::{Deserialize, Serialize};
+use std::str::FromStr;
+
+/// Estimated vbytes for a legacy P2PKH input (script_sig: push sig + push pubkey).
+pub(crate) const P2PKH_INPUT_VBYTES: u64 = 148;
+/// Estimated vbytes for a legacy P2PKH output (8 value + 1 script_len + 25 script).
+pub(crate) const P2PKH_OUTPUT_VBYTES: u64 = 34;
+/// Fixed overhead vbytes for a transaction (version + locktime + input/output counts).
+const TX_OVERHEAD_VBYTES: u64 = 10;
 
 /// Custom Utxo type to decouple from RPC client implementations.
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
+#[serde(into = "UtxoParam", try_from = "UtxoParam")]
 pub struct Utxo {
     pub txid: Txid,
     pub vout: u32,
@@ -61,13 +71,11 @@ impl UtxoSet {
         utxos.sort_by_key(|u| u.amount);
 
         let mut cur_amount = Amount::ZERO;
-        // 10 vbytes for transaction header (version, locktime, etc.)
-        let mut cur_fee = fee_rate * (10 + output_vbytes);
+        let mut cur_fee = fee_rate * (TX_OVERHEAD_VBYTES + output_vbytes);
         let mut selected = vec![];
 
         for utxo in utxos {
-            // 148 vbytes per P2PKH input
-            let input_fee = fee_rate * 148;
+            let input_fee = fee_rate * P2PKH_INPUT_VBYTES;
 
             // Skip UTXOs that cost more in fees than they're worth
             if utxo.amount <= input_fee {
@@ -87,10 +95,44 @@ impl UtxoSet {
     }
 
     pub fn balance(&self) -> Amount {
-        Amount::from_sat(self.utxos.iter().map(|e| e.amount.to_sat()).sum())
+        self.utxos.iter().map(|u| u.amount).sum()
     }
 
     pub fn utxos(&self) -> &[Utxo] {
         &self.utxos
+    }
+}
+
+/// Private serialization proxy for [`Utxo`].
+#[derive(Serialize, Deserialize)]
+struct UtxoParam {
+    txid: String,
+    vout: u32,
+    amount_sat: u64,
+    script_pubkey: String, // hex-encoded
+}
+
+impl From<Utxo> for UtxoParam {
+    fn from(utxo: Utxo) -> Self {
+        Self {
+            txid: utxo.txid.to_string(),
+            vout: utxo.vout,
+            amount_sat: utxo.amount.to_sat(),
+            script_pubkey: utxo.script_pubkey.to_hex_string(),
+        }
+    }
+}
+
+impl TryFrom<UtxoParam> for Utxo {
+    type Error = anyhow::Error;
+
+    fn try_from(p: UtxoParam) -> Result<Self> {
+        Ok(Self {
+            txid: Txid::from_str(&p.txid).context("invalid txid")?,
+            vout: p.vout,
+            amount: Amount::from_sat(p.amount_sat),
+            script_pubkey: ScriptBuf::from_hex(&p.script_pubkey)
+                .context("invalid script_pubkey hex")?,
+        })
     }
 }
