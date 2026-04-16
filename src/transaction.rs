@@ -48,7 +48,8 @@ impl TransactionManager {
         // Calculate change, skip if it's dust
         let sender = &self.wallet.address;
         let dust_limit = TxOut::minimal_non_dust(sender.script_pubkey());
-        let raw_change: Amount = selected.iter().map(|u| u.amount).sum::<Amount>() - total_out - fee;
+        let raw_change: Amount =
+            selected.iter().map(|u| u.amount).sum::<Amount>() - total_out - fee;
         if raw_change >= dust_limit.value {
             receivers.push(Receiver::new(sender.clone(), raw_change));
         }
@@ -108,12 +109,15 @@ impl TransactionManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        test_helpers::{parse_receivers, stub_wallet, test_utxo, RECEIVER},
-        utxo::{SmallestFirst, Utxo},
-    };
-    use bitcoin::{Amount, Network, Txid};
+    use crate::utxo::{SmallestFirst, Utxo};
+    use bitcoin::{Address, Amount, Network, Txid};
     use std::{cell::RefCell, str::FromStr};
+
+    const PK: &str = "cQ7YsHdL8Spm8qv7V6weuV7MskGcF6cfZk4AaNkE1aG8nVGGjTaM";
+    const SENDER: &str = "mwqmgMkf6ZsX2wxSK6GA2JRMVswBo29UWX";
+    const RECEIVER: &str = "tb1qerzrlxcfu24davlur5sqmgzzgsal6wusda40er";
+    const INPUT_TX_ID: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const OUTPUT_TX_ID: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 
     struct MockBtcClient {
         utxos: Vec<Utxo>,
@@ -135,16 +139,16 @@ mod tests {
 
         fn send_raw_transaction(&self, tx_hex: &str) -> anyhow::Result<Txid> {
             self.sent_txs.borrow_mut().push(tx_hex.to_string());
-            Ok(
-                Txid::from_str("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
-                    .unwrap(),
-            )
+            Ok(Txid::from_str(OUTPUT_TX_ID).unwrap())
         }
     }
 
     fn mock_client() -> MockBtcClient {
+        let addr = Address::from_str(SENDER).unwrap().assume_checked();
+        let utxo = Utxo::new(INPUT_TX_ID, 0, 100_000, addr).unwrap();
+
         MockBtcClient {
-            utxos: vec![test_utxo(100_000)],
+            utxos: vec![utxo],
             fee_rate: Amount::from_sat(1),
             sent_txs: RefCell::new(vec![]),
         }
@@ -152,10 +156,13 @@ mod tests {
 
     #[test]
     fn test_prepare_single_receiver() {
-        let tm = TransactionManager::new(stub_wallet());
-        let receivers = parse_receivers(&[(RECEIVER, 1000)], Network::Testnet).unwrap();
+        let tm = TransactionManager::new(Wallet::new(PK, SENDER, Network::Testnet).unwrap());
         let params = tm
-            .prepare(&mock_client(), receivers, &SmallestFirst)
+            .prepare(
+                &mock_client(),
+                vec![Receiver::from_raw(RECEIVER, 1000, Network::Testnet).unwrap()],
+                &SmallestFirst,
+            )
             .unwrap();
 
         assert!(!params.utxos.is_empty());
@@ -165,25 +172,30 @@ mod tests {
 
     #[test]
     fn test_sign_produces_hex() {
-        let tm = TransactionManager::new(stub_wallet());
-        let receivers = parse_receivers(&[(RECEIVER, 1000)], Network::Testnet).unwrap();
+        let tm = TransactionManager::new(Wallet::new(PK, SENDER, Network::Testnet).unwrap());
         let params = tm
-            .prepare(&mock_client(), receivers, &SmallestFirst)
+            .prepare(
+                &mock_client(),
+                vec![Receiver::from_raw(RECEIVER, 1000, Network::Testnet).unwrap()],
+                &SmallestFirst,
+            )
             .unwrap();
 
         let hex = tm.sign(&params).unwrap();
         assert!(!hex.is_empty());
-        // Valid hex string (even length, all hex chars)
         assert!(hex.len() % 2 == 0);
         assert!(hex.chars().all(|c| c.is_ascii_hexdigit()));
     }
 
     #[test]
     fn test_sign_is_deterministic() {
-        let tm = TransactionManager::new(stub_wallet());
-        let receivers = parse_receivers(&[(RECEIVER, 1000)], Network::Testnet).unwrap();
+        let tm = TransactionManager::new(Wallet::new(PK, SENDER, Network::Testnet).unwrap());
         let params = tm
-            .prepare(&mock_client(), receivers, &SmallestFirst)
+            .prepare(
+                &mock_client(),
+                vec![Receiver::from_raw(RECEIVER, 1000, Network::Testnet).unwrap()],
+                &SmallestFirst,
+            )
             .unwrap();
 
         let hex1 = tm.sign(&params).unwrap();
@@ -193,14 +205,18 @@ mod tests {
 
     #[test]
     fn test_prepare_multiple_receivers() {
-        let tm = TransactionManager::new(stub_wallet());
-        let receivers =
-            parse_receivers(&[(RECEIVER, 500), (RECEIVER, 500)], Network::Testnet).unwrap();
+        let tm = TransactionManager::new(Wallet::new(PK, SENDER, Network::Testnet).unwrap());
         let params = tm
-            .prepare(&mock_client(), receivers, &SmallestFirst)
+            .prepare(
+                &mock_client(),
+                vec![
+                    Receiver::from_raw(RECEIVER, 500, Network::Testnet).unwrap(),
+                    Receiver::from_raw(RECEIVER, 500, Network::Testnet).unwrap(),
+                ],
+                &SmallestFirst,
+            )
             .unwrap();
 
-        // At least the 2 explicit receivers
         assert!(params.receivers.len() >= 2);
         assert_eq!(params.receivers[0].amount, Amount::from_sat(500));
         assert_eq!(params.receivers[1].amount, Amount::from_sat(500));
@@ -208,10 +224,15 @@ mod tests {
 
     #[test]
     fn test_send_broadcasts_signed_tx() {
-        let tm = TransactionManager::new(stub_wallet());
+        let tm = TransactionManager::new(Wallet::new(PK, SENDER, Network::Testnet).unwrap());
         let client = mock_client();
-        let receivers = parse_receivers(&[(RECEIVER, 1000)], Network::Testnet).unwrap();
-        let params = tm.prepare(&client, receivers, &SmallestFirst).unwrap();
+        let params = tm
+            .prepare(
+                &client,
+                vec![Receiver::from_raw(RECEIVER, 1000, Network::Testnet).unwrap()],
+                &SmallestFirst,
+            )
+            .unwrap();
 
         let tx_hex = tm.sign(&params).unwrap();
         let txid = client.send_raw_transaction(&tx_hex).unwrap();

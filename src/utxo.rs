@@ -1,5 +1,5 @@
 use anyhow::{bail, Result};
-use bitcoin::{Amount, OutPoint, ScriptBuf, Sequence, TxIn, Txid, Witness};
+use bitcoin::{Address, Amount, OutPoint, ScriptBuf, Sequence, TxIn, Txid, Witness};
 use bitcoincore_rpc::json::ListUnspentResultEntry;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
@@ -19,6 +19,17 @@ pub struct Utxo {
     pub vout: u32,
     pub amount: Amount,
     pub script_pubkey: ScriptBuf,
+}
+
+impl Utxo {
+    pub fn new(txid: &str, vout: u32, amount: u64, addr: Address) -> Result<Self> {
+        Ok(Utxo {
+            txid: Txid::from_str(txid)?,
+            vout: vout,
+            amount: Amount::from_sat(amount),
+            script_pubkey: addr.script_pubkey(),
+        })
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -136,8 +147,22 @@ impl CoinSelector for SmallestFirst {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_helpers::test_utxo;
-    use bitcoin::Amount;
+    use bitcoin::{Address, Amount};
+
+    fn test_utxo(sat: u64) -> Utxo {
+        let addr = Address::from_str("mwqmgMkf6ZsX2wxSK6GA2JRMVswBo29UWX")
+            .unwrap()
+            .assume_checked();
+        Utxo {
+            txid: Txid::from_str(
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            )
+            .unwrap(),
+            vout: 0,
+            amount: Amount::from_sat(sat),
+            script_pubkey: addr.script_pubkey(),
+        }
+    }
 
     #[test]
     fn test_select_single_utxo_covers_amount() {

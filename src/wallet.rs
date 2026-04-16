@@ -10,21 +10,39 @@ use std::{
 
 /// JSON representation of wallet on disk.
 #[derive(Serialize, Deserialize)]
-pub struct WalletFile {
+pub struct WalletUnchecked {
     pub private_key: String,
     pub address: String,
 }
 
-impl WalletFile {
-    pub fn into_wallet(self, network: Network) -> Result<Wallet> {
+/// In-memory wallet with pre-parsed key material.
+pub struct Wallet {
+    pub secret_key: SecretKey,
+    pub public_key: PublicKey,
+    pub address: Address,
+    pub network: Network,
+}
+
+impl Wallet {
+    pub fn new(pk: &str, addr: &str, network: Network) -> Result<Self> {
+        Wallet::parse(
+            WalletUnchecked {
+                private_key: pk.to_owned(),
+                address: addr.to_owned(),
+            },
+            network,
+        )
+    }
+
+    pub fn parse(w: WalletUnchecked, network: Network) -> Result<Self> {
         let privkey =
-            PrivateKey::from_wif(&self.private_key).context("failed to parse private key WIF")?;
+            PrivateKey::from_wif(&w.private_key).context("failed to parse private key WIF")?;
         let secp = Secp256k1::new();
         let public_key = PublicKey::from_private_key(&secp, &privkey);
         let expected_addr = Address::p2pkh(public_key, network);
 
-        if !self.address.is_empty() {
-            let stored_addr = Address::from_str(&self.address)?
+        if !w.address.is_empty() {
+            let stored_addr = Address::from_str(&w.address)?
                 .require_network(network)
                 .context("wallet was created for a different network")?;
             if stored_addr != expected_addr {
@@ -39,17 +57,7 @@ impl WalletFile {
             network,
         })
     }
-}
 
-/// In-memory wallet with pre-parsed key material.
-pub struct Wallet {
-    pub secret_key: SecretKey,
-    pub public_key: PublicKey,
-    pub address: Address,
-    pub network: Network,
-}
-
-impl Wallet {
     pub fn generate(network: Network) -> Self {
         let secp = Secp256k1::new();
         let (secret_key, public_key) = secp.generate_keypair(&mut OsRng);
@@ -67,13 +75,13 @@ impl Wallet {
     pub fn from_file(file_path: &str, network: Network) -> Result<Self> {
         let file = File::open(file_path).context("failed to open wallet file")?;
         let reader = BufReader::new(file);
-        let wf: WalletFile =
+        let w: WalletUnchecked =
             serde_json::from_reader(reader).context("failed to deserialize wallet file")?;
-        wf.into_wallet(network)
+        Wallet::parse(w, network)
     }
 
     pub fn save(&self, file_path: &str) -> Result<()> {
-        let wf = WalletFile {
+        let wf = WalletUnchecked {
             private_key: PrivateKey::new(self.secret_key, self.network).to_wif(),
             address: self.address.to_string(),
         };

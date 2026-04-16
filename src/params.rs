@@ -66,6 +66,15 @@ impl Receiver {
     pub fn new(address: Address, amount: Amount) -> Self {
         Self { address, amount }
     }
+
+    pub fn from_raw(address: &str, amount: u64, network: Network) -> Result<Self> {
+        Ok(Self {
+            address: Address::from_str(address)
+                .context("failed to convert str to address")?
+                .require_network(network)?,
+            amount: Amount::from_sat(amount),
+        })
+    }
 }
 
 impl From<&Receiver> for TxOut {
@@ -151,8 +160,28 @@ impl TransactionParam {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_helpers::{test_address, test_utxo};
-    use bitcoin::{Amount, Network};
+    use bitcoin::{Amount, Network, Txid};
+
+    const SENDER: &str = "mwqmgMkf6ZsX2wxSK6GA2JRMVswBo29UWX";
+
+    fn test_address() -> Address {
+        Address::from_str(SENDER)
+            .unwrap()
+            .require_network(Network::Testnet)
+            .unwrap()
+    }
+
+    fn test_utxo(sat: u64) -> Utxo {
+        Utxo {
+            txid: Txid::from_str(
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            )
+            .unwrap(),
+            vout: 0,
+            amount: Amount::from_sat(sat),
+            script_pubkey: test_address().script_pubkey(),
+        }
+    }
 
     fn unchecked_receiver(addr: &Address, sat: u64) -> ReceiverUnchecked {
         ReceiverUnchecked::from(&Receiver::new(addr.clone(), Amount::from_sat(sat)))

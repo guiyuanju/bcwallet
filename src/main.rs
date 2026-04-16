@@ -1,7 +1,5 @@
 mod btcclient;
 mod params;
-#[cfg(test)]
-mod test_helpers;
 mod transaction;
 mod utxo;
 mod wallet;
