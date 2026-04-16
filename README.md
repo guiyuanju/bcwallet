@@ -62,3 +62,14 @@ Options:
 
 - Sender address only support legacy P2PKH
 - Doesn't support Multi-Sig
+- Uses a simple smallest UTXO first strategy to select inputs
+- Transaction fee may be a little higher (diff <= sizeof(one output))
+
+## Todo
+
+- [ ] Receiver should verify network at construction time, only once
+- [ ] BtcClient mock in test may panic if send concurrently, add lock
+- [ ] Use Transaction type provided by bitcoin-core to estimate vbytes
+- [ ] Multi-round UTXO output selection algorithm
+- [ ] Support SegWit address
+- [ ] Use PSBT to support Multi-Sig
