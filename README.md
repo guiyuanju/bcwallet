@@ -67,6 +67,7 @@ Options:
 
 ## Todo
 
+- [ ] Separate private key and address to different files, use only address for online operations, for better security
 - [ ] Receiver should verify network at construction time, only once
 - [ ] BtcClient mock in test may panic if send concurrently, add lock
 - [ ] Use Transaction type provided by bitcoin-core to estimate vbytes
