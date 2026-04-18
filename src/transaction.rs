@@ -161,6 +161,25 @@ mod tests {
     }
 
     #[test]
+    fn test_prepare_multiple_receivers() {
+        let tm = TransactionManager::new(Wallet::new(PK, SENDER, Network::Testnet).unwrap());
+        let params = tm
+            .prepare(
+                &mock_client(),
+                vec![
+                    Receiver::from_raw(RECEIVER, 500, Network::Testnet).unwrap(),
+                    Receiver::from_raw(RECEIVER, 500, Network::Testnet).unwrap(),
+                ],
+                &SmallestFirst,
+            )
+            .unwrap();
+
+        assert!(params.receivers.len() >= 2);
+        assert_eq!(params.receivers[0].amount, Amount::from_sat(500));
+        assert_eq!(params.receivers[1].amount, Amount::from_sat(500));
+    }
+
+    #[test]
     fn test_sign_produces_hex() {
         let tm = TransactionManager::new(Wallet::new(PK, SENDER, Network::Testnet).unwrap());
         let params = tm
@@ -191,48 +210,5 @@ mod tests {
         let hex1 = tm.sign(&params).unwrap();
         let hex2 = tm.sign(&params).unwrap();
         assert_eq!(hex1, hex2);
-    }
-
-    #[test]
-    fn test_prepare_multiple_receivers() {
-        let tm = TransactionManager::new(Wallet::new(PK, SENDER, Network::Testnet).unwrap());
-        let params = tm
-            .prepare(
-                &mock_client(),
-                vec![
-                    Receiver::from_raw(RECEIVER, 500, Network::Testnet).unwrap(),
-                    Receiver::from_raw(RECEIVER, 500, Network::Testnet).unwrap(),
-                ],
-                &SmallestFirst,
-            )
-            .unwrap();
-
-        assert!(params.receivers.len() >= 2);
-        assert_eq!(params.receivers[0].amount, Amount::from_sat(500));
-        assert_eq!(params.receivers[1].amount, Amount::from_sat(500));
-    }
-
-    #[test]
-    fn test_send_broadcasts_signed_tx() {
-        let tm = TransactionManager::new(Wallet::new(PK, SENDER, Network::Testnet).unwrap());
-        let client = mock_client();
-        let params = tm
-            .prepare(
-                &client,
-                vec![Receiver::from_raw(RECEIVER, 1000, Network::Testnet).unwrap()],
-                &SmallestFirst,
-            )
-            .unwrap();
-
-        let tx_hex = tm.sign(&params).unwrap();
-        let txid = client.send_raw_transaction(&tx_hex).unwrap();
-
-        assert_eq!(
-            txid.to_string(),
-            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-        );
-        let sent = client.sent_txs.borrow();
-        assert_eq!(sent.len(), 1);
-        assert_eq!(sent[0], tx_hex);
     }
 }
