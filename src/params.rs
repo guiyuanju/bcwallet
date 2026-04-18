@@ -8,7 +8,7 @@ use bitcoin::{absolute, transaction::Version, Address, Amount, Network, Transact
 use serde::{Deserialize, Serialize};
 use std::{
     fs::File,
-    io::{BufReader, Write},
+    io::{BufReader, Read, Write},
     str::FromStr,
 };
 
@@ -122,17 +122,24 @@ impl TransactionParamUnchecked {
         })
     }
 
+    pub fn from_reader(reader: impl Read) -> Result<Self> {
+        serde_json::from_reader(reader).context("failed to deserialize params")
+    }
+
+    pub fn write_to(&self, mut writer: impl Write) -> Result<()> {
+        let json =
+            serde_json::to_string_pretty(self).context("failed to serialize params to json")?;
+        writeln!(writer, "{}", json).context("failed to write params")
+    }
+
     pub fn from_file(path: &str) -> Result<Self> {
         let file = File::open(path).context("failed to open params file")?;
-        let reader = BufReader::new(file);
-        serde_json::from_reader(reader).context("failed to deserialize params file")
+        Self::from_reader(BufReader::new(file))
     }
 
     pub fn save_as_file(&self, path: &str) -> Result<()> {
-        let json =
-            serde_json::to_string_pretty(self).context("failed to serialize params to json")?;
-        let mut file = File::create(path).context("failed to create params file")?;
-        writeln!(file, "{}", json).context("failed to write params file")
+        let file = File::create(path).context("failed to create params file")?;
+        self.write_to(file)
     }
 }
 
@@ -147,12 +154,17 @@ impl TransactionParam {
         Self { receivers, utxos }
     }
 
-    pub fn save_as_file(&self, path: &str) -> Result<()> {
+    pub fn write_to(&self, writer: impl Write) -> Result<()> {
         let unchecked = TransactionParamUnchecked::new(
             self.receivers.iter().map(ReceiverUnchecked::from).collect(),
             &self.utxos,
         );
-        unchecked.save_as_file(path)
+        unchecked.write_to(writer)
+    }
+
+    pub fn save_as_file(&self, path: &str) -> Result<()> {
+        let file = File::create(path).context("failed to create params file")?;
+        self.write_to(file)
     }
 }
 
@@ -251,10 +263,10 @@ mod tests {
             &[test_utxo(50_000)],
         );
 
-        let path = "/tmp/bcwallet_test_params.json";
-        unchecked.save_as_file(path).unwrap();
+        let mut buf = Vec::new();
+        unchecked.write_to(&mut buf).unwrap();
 
-        let loaded = TransactionParamUnchecked::from_file(path).unwrap();
+        let loaded = TransactionParamUnchecked::from_reader(buf.as_slice()).unwrap();
         assert_eq!(loaded.receivers.len(), 1);
         assert_eq!(loaded.receivers[0].amount_sat, 3000);
         assert_eq!(loaded.utxos.len(), 1);
@@ -264,8 +276,6 @@ mod tests {
         let checked = loaded.check(Network::Testnet).unwrap();
         assert_eq!(checked.receivers.len(), 1);
         assert_eq!(checked.receivers[0].amount, Amount::from_sat(3000));
-
-        std::fs::remove_file(path).ok();
     }
 
     #[test]
