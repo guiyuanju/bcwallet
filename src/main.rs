@@ -1,17 +1,11 @@
-mod btcclient;
-mod params;
-mod transaction;
-mod utxo;
-mod wallet;
-
-use crate::{
+use anyhow::{bail, Result};
+use bcwallet::{
     btcclient::{BtcClient, RpcClient},
     params::{ReceiverUnchecked, TransactionParamUnchecked},
     transaction::TransactionManager,
     utxo::SmallestFirst,
     wallet::Wallet,
 };
-use anyhow::{bail, Result};
 use bitcoin::Network;
 use clap::{Parser, Subcommand};
 use std::env;
