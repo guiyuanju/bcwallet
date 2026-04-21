@@ -6,7 +6,7 @@
 
 use crate::utxo::Utxo;
 use anyhow::{bail, Context, Result};
-use bitcoin::{Address, Amount, Txid};
+use bitcoin::{absolute::Time, Address, Amount, Txid};
 use bitcoincore_rpc::{
     json::{ImportDescriptors, Timestamp},
     Auth, Client, RpcApi,
@@ -19,7 +19,7 @@ pub trait BtcClient {
         Ok(self.get_utxos(addr)?.iter().map(|u| u.amount).sum())
     }
     fn get_fee_rate(&self) -> Result<Amount>;
-    fn watch_addresses(&self, addrs: &[&Address]) -> Result<()>;
+    fn watch_addresses(&self, addrs: &[&Address], from: &[&Time]) -> Result<()>;
     fn send_raw_transaction(&self, tx_hex: &str) -> Result<Txid>;
 }
 
@@ -36,7 +36,7 @@ impl RpcClient {
         Ok(Self { client })
     }
 
-    fn import_descriptor(&self, addr: &Address) -> Result<()> {
+    fn import_descriptor(&self, addr: &Address, from: &Time) -> Result<()> {
         let addr_descrip = format!("addr({addr})");
 
         let descriptor = self
@@ -47,7 +47,7 @@ impl RpcClient {
 
         let mut req = ImportDescriptors::default();
         req.descriptor = descriptor;
-        req.timestamp = Timestamp::Now;
+        req.timestamp = Timestamp::Time(from.to_consensus_u32() as u64);
 
         let res = self
             .client
@@ -80,9 +80,12 @@ impl BtcClient for RpcClient {
     }
 
     /// Import address descriptors so Bitcoin Core watches them.
-    fn watch_addresses(&self, addrs: &[&Address]) -> Result<()> {
-        for &addr in addrs {
-            self.import_descriptor(addr)?;
+    fn watch_addresses(&self, addrs: &[&Address], from: &[&Time]) -> Result<()> {
+        if addrs.len() != from.len() {
+            bail!("expect addrs len equals from len");
+        }
+        for (i, &addr) in addrs.iter().enumerate() {
+            self.import_descriptor(addr, from[i])?;
         }
         Ok(())
     }

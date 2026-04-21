@@ -6,7 +6,7 @@ use bcwallet::{
     utxo::SmallestFirst,
     wallet::Wallet,
 };
-use bitcoin::Network;
+use bitcoin::{absolute::Time, Network};
 use clap::{Parser, Subcommand};
 use std::env;
 
@@ -22,8 +22,8 @@ enum Commands {
     NewWallet,
     /// Get balance of current address
     Balance,
-    /// Watch current address, need only called once for each new address
-    Watch,
+    /// Watch current address, scan from the provided timestamp, need only called once for each new address
+    Watch { from: Time },
     /// Prepare transaction params file (online, requires RPC)
     Prepare {
         /// Receivers in "address:amount_sat" format (repeatable)
@@ -59,9 +59,10 @@ fn main() -> Result<()> {
             let balance = cfg.btc_client()?.get_balance(&wallet.address)?;
             println!("{}", balance);
         }
-        Commands::Watch => {
+        Commands::Watch { from } => {
             let wallet = cfg.wallet()?;
-            cfg.btc_client()?.watch_addresses(&[&wallet.address])?;
+            cfg.btc_client()?
+                .watch_addresses(&[&wallet.address], &[&from])?;
         }
         Commands::Prepare { receiver, output } => {
             let receivers = receiver

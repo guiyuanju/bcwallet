@@ -100,7 +100,7 @@ impl TransactionManager {
 mod tests {
     use super::*;
     use crate::utxo::{SmallestFirst, Utxo};
-    use bitcoin::{Address, Amount, Network, Txid};
+    use bitcoin::{absolute::Time, Address, Amount, Network, Txid};
     use std::{cell::RefCell, str::FromStr};
 
     const PK: &str = "cQ7YsHdL8Spm8qv7V6weuV7MskGcF6cfZk4AaNkE1aG8nVGGjTaM";
@@ -123,7 +123,7 @@ mod tests {
             Ok(self.fee_rate)
         }
 
-        fn watch_addresses(&self, _addrs: &[&bitcoin::Address]) -> Result<()> {
+        fn watch_addresses(&self, _addrs: &[&bitcoin::Address], _from: &[&Time]) -> Result<()> {
             Ok(())
         }
 

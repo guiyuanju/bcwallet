@@ -1,3 +1,4 @@
+use anyhow::Result;
 use bcwallet::{
     btcclient::BtcClient,
     params::Receiver,
@@ -5,7 +6,9 @@ use bcwallet::{
     utxo::{SmallestFirst, Utxo},
     wallet::Wallet,
 };
-use bitcoin::{consensus::encode::deserialize_hex, Address, Amount, Network, Transaction, Txid};
+use bitcoin::{
+    absolute::Time, consensus::encode::deserialize_hex, Address, Amount, Network, Transaction, Txid,
+};
 use std::{cell::RefCell, str::FromStr};
 
 struct MockBtcClient {
@@ -21,7 +24,7 @@ impl BtcClient for MockBtcClient {
     fn get_fee_rate(&self) -> anyhow::Result<Amount> {
         Ok(self.fee_rate)
     }
-    fn watch_addresses(&self, _addrs: &[&Address]) -> anyhow::Result<()> {
+    fn watch_addresses(&self, _addrs: &[&bitcoin::Address], _from: &[&Time]) -> Result<()> {
         Ok(())
     }
     fn send_raw_transaction(&self, tx_hex: &str) -> anyhow::Result<Txid> {
