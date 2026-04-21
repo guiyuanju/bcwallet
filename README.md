@@ -74,6 +74,7 @@ Options:
 - [ ] Multi-round UTXO output selection algorithm
 - [ ] Support SegWit address
 - [ ] Use PSBT to support Multi-Sig
+- [ ] Allow to watch an address which has old transactions: add timestamp param to watch command
 
 ## What I learned
 
